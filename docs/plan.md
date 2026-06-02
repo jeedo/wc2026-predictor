@@ -5,7 +5,7 @@
 
 ## Phase 1: Setup & Scaffolding
 
-- [ ] 1. Initialise directory structure: create `infra/`, `functions/`, `frontend/`, `pipelines/` folders
+- [x] 1. Initialise directory structure: create `infra/`, `functions/`, `frontend/`, `pipelines/` folders
 - [ ] 2. Initialise Python project in `functions/` with `uv init`; add runtime deps (`azure-functions`, `azure-cosmos`, `azure-storage-queue`, `anthropic`, `httpx`) and dev deps (`pytest`, `pytest-asyncio`, `ruff`, `mypy`)
 - [ ] 3. Create `functions/host.json` and `functions/local.settings.json.template` with Azurite connection strings as placeholders; add `local.settings.json` to `.gitignore`
 - [ ] 4. Scaffold React app in `frontend/` using Vite (`npm create vite@latest`)
