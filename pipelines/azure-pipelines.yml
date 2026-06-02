@@ -213,6 +213,11 @@ stages:
               versionSpec: $(pythonVersion)
 
           - script: |
+              echo "Waiting 60s for Function App cold start..."
+              sleep 60
+            displayName: 'Wait for Function App warmup'
+
+          - script: |
               set -euo pipefail
               API_BASE="https://$(functionAppName).azurewebsites.net/api"
               echo "Running smoke tests against $API_BASE"
