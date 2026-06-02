@@ -25,18 +25,24 @@ OK   = "\033[32mOK  \033[0m"
 FAIL = "\033[31mFAIL\033[0m"
 
 
-def get(base: str, path: str, retries: int = 3) -> tuple[int, bytes]:
+def get(base: str, path: str, retries: int = 5) -> tuple[int, bytes]:
     url = base.rstrip("/") + path
     for attempt in range(retries):
         try:
-            with urllib.request.urlopen(url, timeout=15) as r:
+            with urllib.request.urlopen(url, timeout=20) as r:
                 return r.status, r.read()
         except urllib.error.HTTPError as e:
+            # 503 = Function App cold-starting; retry with backoff
+            if e.code == 503 and attempt < retries - 1:
+                wait = 15 * (attempt + 1)
+                print(f"  503 cold-start on {path}, retrying in {wait}s...")
+                time.sleep(wait)
+                continue
             return e.code, b""
         except Exception as e:
             if attempt == retries - 1:
                 raise
-            time.sleep(2 ** attempt)
+            time.sleep(5)
     return -1, b""
 
 

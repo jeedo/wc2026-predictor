@@ -153,7 +153,8 @@ resource hostingPlan 'Microsoft.Web/serverfarms@2023-01-01' = {
   name: 'plan-wc2026-${suffix}'
   location: functionLocation
   sku: { name: 'Y1', tier: 'Dynamic' }
-  properties: {}
+  kind: 'linux'
+  properties: { reserved: true }  // required for Linux Consumption plan
 }
 
 // ---------------------------------------------------------------------------
@@ -162,12 +163,12 @@ resource hostingPlan 'Microsoft.Web/serverfarms@2023-01-01' = {
 resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
   name: 'func-wc2026-${suffix}'
   location: functionLocation
-  kind: 'functionapp'
+  kind: 'functionapp,linux'
   identity: { type: 'SystemAssigned' }
   properties: {
     serverFarmId: hostingPlan.id
     siteConfig: {
-      pythonVersion: '3.11'
+      linuxFxVersion: 'PYTHON|3.11'
       appSettings: [
         {
           name: 'AzureWebJobsStorage'
@@ -192,6 +193,18 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
         {
           name: 'PREDICT_QUEUE_NAME'
           value: 'predict-trigger'
+        }
+        {
+          name: 'CosmosDbConnectionString'
+          value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/cosmos-connection-string/)'
+        }
+        {
+          name: 'APISPORTS_API_KEY'
+          value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/apisports-api-key/)'
+        }
+        {
+          name: 'ANTHROPIC_API_KEY'
+          value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/anthropic-api-key/)'
         }
       ]
     }
