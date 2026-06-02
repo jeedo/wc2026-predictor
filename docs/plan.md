@@ -45,5 +45,5 @@
 
 - [x] 27. Write `pipelines/azure-pipelines.yml` with three stages: `infra` (`az deployment group create` on `main.bicep`), `functions` (`uv sync` → zip → `az functionapp deploy`), `frontend` (`npm ci && npm run build` → `AzureStaticWebApp@0`)
 - [x] 28. Add Key Vault secret provisioning to the `infra` stage: write `apisports-api-key`, `anthropic-api-key`, and `cosmos-connection-string` from Azure DevOps variable group; grant Function App managed identity `Key Vault Secrets User` role via Bicep output
-- [ ] 29. Deploy to Azure via pipeline; run smoke tests: call each `fn_api` endpoint and assert HTTP 200; verify `fn_ingest` executes on schedule and writes to Cosmos DB
+- [x] 29. Deploy to Azure via pipeline; run smoke tests: call each `fn_api` endpoint and assert HTTP 200; verify `fn_ingest` executes on schedule and writes to Cosmos DB
 - [ ] 30. Cost check: after first live tournament day confirm Azure portal shows $0.00 usage across all services and Claude spend is within budget

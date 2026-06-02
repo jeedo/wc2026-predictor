@@ -190,3 +190,33 @@ stages:
               app_location: frontend
               output_location: dist
               skip_app_build: true
+
+  # ---------------------------------------------------------------------------
+  # Stage 4: Smoke Tests
+  # Calls each fn-api endpoint and asserts HTTP 200 / expected shape.
+  # ---------------------------------------------------------------------------
+  - stage: smoke
+    displayName: 'Smoke Tests'
+    dependsOn:
+      - infra
+      - frontend
+    variables:
+      functionAppName: $[ stageDependencies.infra.BicepDeploy.outputs['BicepOutput.functionAppName'] ]
+    jobs:
+      - job: SmokeTest
+        displayName: 'POST-deploy API smoke tests'
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(pythonVersion)
+
+          - script: |
+              set -euo pipefail
+              API_BASE="https://$(functionAppName).azurewebsites.net/api"
+              echo "Running smoke tests against $API_BASE"
+              python scripts/smoke_test.py "$API_BASE"
+            displayName: 'Run smoke_test.py'
+            env:
+              functionAppName: $(functionAppName)
