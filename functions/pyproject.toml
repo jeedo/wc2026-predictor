@@ -13,6 +13,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "aiohttp>=3.14.0",
     "mypy>=2.1.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
@@ -22,6 +23,9 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
+markers = [
+    "integration: requires Azurite queue service running locally",
+]
 
 [tool.ruff]
 line-length = 100

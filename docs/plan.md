@@ -34,12 +34,12 @@
 
 ## Phase 4: Testing & QA
 
-- [ ] 21. Unit tests for `shared/api_football.py`: mock HTTP responses; assert correct parsing of fixtures, standings, and team data; assert round-string-to-integer normalisation
-- [ ] 22. Unit tests for `fn_ingest`: assert teams seeded on first run only; assert fixture upsert; assert correct detection of `FINISHED` transitions and queue message content
-- [ ] 23. Unit tests for `fn_predict`: assert prompt construction includes all 12 groups; assert idempotent write (second call with same matchday overwrites, not duplicates); assert malformed Claude response is handled gracefully
-- [ ] 24. Unit tests for accuracy scoring: assert strict scoring (both winner and runner-up must match); assert partial match scores zero; assert max score of 12
-- [ ] 25. Unit tests for `fn_api`: assert response shapes match architecture spec for all four endpoints; assert 404 for unknown matchday
-- [ ] 26. Local integration test: start Azurite and Functions Core Tools; run `fn_ingest` with fixture stub data; verify queue message triggers `fn_predict`; verify `fn_api` returns expected data end-to-end
+- [x] 21. Unit tests for `shared/api_football.py`: mock HTTP responses; assert correct parsing of fixtures, standings, and team data; assert round-string-to-integer normalisation
+- [x] 22. Unit tests for `fn_ingest`: assert teams seeded on first run only; assert fixture upsert; assert correct detection of `FINISHED` transitions and queue message content
+- [x] 23. Unit tests for `fn_predict`: assert prompt construction includes all 12 groups; assert idempotent write (second call with same matchday overwrites, not duplicates); assert malformed Claude response is handled gracefully
+- [x] 24. Unit tests for accuracy scoring: assert strict scoring (both winner and runner-up must match); assert partial match scores zero; assert max score of 12
+- [x] 25. Unit tests for `fn_api`: assert response shapes match architecture spec for all four endpoints; assert 404 for unknown matchday
+- [x] 26. Local integration test: start Azurite and Functions Core Tools; run `fn_ingest` with fixture stub data; verify queue message triggers `fn_predict`; verify `fn_api` returns expected data end-to-end
 
 ## Phase 5: CI/CD & Deployment
 
