@@ -143,12 +143,10 @@ stages:
               scriptLocation: inlineScript
               inlineScript: |
                 set -euo pipefail
-                az functionapp deploy \
+                az functionapp deployment source config-zip \
                   --resource-group $(resourceGroup) \
                   --name "$(functionAppName)" \
-                  --src-path functions.zip \
-                  --type zip \
-                  --async false
+                  --src functions.zip
 
   # ---------------------------------------------------------------------------
   # Stage 3: Frontend
