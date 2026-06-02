@@ -122,8 +122,13 @@ stages:
           - script: |
               export PATH="$HOME/.cargo/bin:$PATH"
               cd functions
-              uv sync --no-dev
-            displayName: 'Install Python dependencies'
+              # Export locked deps and install into .python_packages
+              # Azure Functions Linux adds .python_packages/lib/site-packages to PYTHONPATH
+              uv export --no-dev --format requirements-txt -o /tmp/requirements.txt
+              pip install --quiet \
+                --target .python_packages/lib/site-packages \
+                -r /tmp/requirements.txt
+            displayName: 'Install Python dependencies into .python_packages'
 
           - script: |
               cd functions
@@ -132,8 +137,9 @@ stages:
                 --exclude "__pycache__/*" \
                 --exclude ".venv/*" \
                 --exclude "tests/*" \
-                --exclude "*.lock"
-            displayName: 'Zip function app'
+                --exclude "*.lock" \
+                --exclude "*.egg-info/*"
+            displayName: 'Zip function app (includes .python_packages)'
 
           - task: AzureCLI@2
             displayName: 'Deploy to Azure Functions'
