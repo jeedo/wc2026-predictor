@@ -26,7 +26,7 @@
 
 ## Phase 3: API / Interface
 
-- [ ] 16. Build React **Groups View**: fetch `GET /predictions`; render all 12 groups (A–L) each showing predicted winner, runner-up, and Claude reasoning blurb
+- [x] 16. Build React **Groups View**: fetch `GET /predictions`; render all 12 groups (A–L) each showing predicted winner, runner-up, and Claude reasoning blurb
 - [ ] 17. Build React **Fixtures View**: fetch `GET /fixtures/{matchday}`; render upcoming and completed matches with scores, kickoff times, and status per group; include matchday tab selector
 - [ ] 18. Build React **Accuracy View**: fetch `GET /accuracy`; render overall score (e.g. 8/12) and a per-group row showing predicted vs actual with correct/incorrect indicator
 - [ ] 19. Wire frontend to `fn-api` using an environment variable (`VITE_API_BASE_URL`) so the base URL is injected at build time by the Azure DevOps pipeline
