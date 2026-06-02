@@ -16,8 +16,8 @@
 - [x] 6. Write `infra/main.bicep`: provision Storage Account, Key Vault, Cosmos DB account with free tier and 4 containers (`teams`, `fixtures`, `predictions`, `scores`), Function App (Consumption plan), and Static Web App
 - [x] 7. Implement `functions/shared/cosmos.py`: upsert and point-read helpers for all four containers
 - [x] 8. Implement `functions/shared/api_football.py`: HTTP client wrapping API-Football v3 `GET /teams`, `GET /fixtures`, `GET /standings`; normalise `"Group Stage - N"` round strings to integers `1`/`2`/`3`
-- [ ] 9. Implement `fn_ingest` Timer Trigger: on first run seed `teams` container from `GET /teams`; on every run fetch fixtures via `GET /fixtures` and upsert to `fixtures` container
-- [ ] 10. Extend `fn_ingest`: after each upsert compare incoming fixture `status` against stored value; enqueue a message to the `predict-trigger` Storage Queue for every fixture that transitions to `FINISHED`
+- [x] 9. Implement `fn_ingest` Timer Trigger: on first run seed `teams` container from `GET /teams`; on every run fetch fixtures via `GET /fixtures` and upsert to `fixtures` container
+- [x] 10. Extend `fn_ingest`: after each upsert compare incoming fixture `status` against stored value; enqueue a message to the `predict-trigger` Storage Queue for every fixture that transitions to `FINISHED`
 - [ ] 11. Implement `fn_predict` Queue Trigger: read `fixtures` and `teams` from Cosmos DB; build a structured prompt with group standings, team form, and FIFA rankings for all 12 groups
 - [ ] 12. Extend `fn_predict`: call Claude API (`claude-haiku-4-5`) with the prompt; parse JSON response; write idempotent prediction document to `predictions` container keyed by matchday
 - [ ] 13. Implement accuracy scoring in `fn_predict`: after writing predictions, compare against completed fixtures; award one point per group where **both** winner and runner-up match; write result to `scores` container

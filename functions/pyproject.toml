@@ -18,3 +18,10 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "ruff>=0.15.15",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
