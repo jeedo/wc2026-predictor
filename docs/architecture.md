@@ -25,7 +25,7 @@ The FIFA World Cup 2026 group stage features 48 teams across 12 groups (A–L), 
 | Layer        | Technology                               | Rationale                                                                       |
 |--------------|------------------------------------------|---------------------------------------------------------------------------------|
 | Frontend     | Azure Static Web Apps (React)            | Free hobby tier; deploys from Azure DevOps; no server management                |
-| API Layer    | Azure Functions — HTTP Trigger (Python)  | Serverless; 1M free executions/month; familiar from DLAB pipelines              |
+| API Layer    | Azure Functions — HTTP Trigger (Python)  | Serverless; 1M free executions/month; no server management                      |
 | Ingestion    | Azure Functions — Timer Trigger (Python) | Cron-scheduled every 6h during tournament window; zero cost at this scale       |
 | Prediction   | Azure Functions — Queue Trigger (Python) | Triggered by fn-ingest via Storage Queue when matches finish; event-driven      |
 | Event Bus    | Azure Queue Storage                      | Free (bundled with Functions storage account); decouples ingest from prediction |
@@ -33,9 +33,9 @@ The FIFA World Cup 2026 group stage features 48 teams across 12 groups (A–L), 
 | AI / LLM     | Anthropic Claude API (claude-haiku-4-5)  | ~$0.14 for full group stage; sufficient for structured JSON prediction tasks    |
 | Data Source  | API-Football v3 (api-sports.io)          | Free tier: 100 req/day; covers WC 2026 fixtures, live scores, group standings   |
 | Secrets      | Azure Key Vault                          | Managed identity access; no credentials in app settings or source control       |
-| CI/CD        | Azure DevOps Pipelines                   | Existing DLAB YAML templates reused; Bicep infra + function deploy stages       |
+| CI/CD        | Azure DevOps Pipelines                   | YAML pipelines; Bicep infra + function deploy stages                            |
 | IaC          | Azure Bicep                              | Declarative provisioning of Cosmos DB, Function App, Static Web App, Key Vault  |
-| Package Mgmt | uv (Python)                              | Consistent with DLAB toolchain; fast lockfile-based installs in pipeline        |
+| Package Mgmt | uv (Python)                              | Fast lockfile-based installs; consistent across local and pipeline              |
 | Local Dev    | Azure Functions Core Tools + Azurite     | Run functions and emulate Cosmos DB locally without Azure connectivity           |
 
 -----
@@ -104,7 +104,7 @@ Four containers, all using NoSQL JSON documents. Partition keys designed for poi
 
 ### 3.5 Azure DevOps Pipeline
 
-Three-stage pipeline reusing existing DLAB YAML template patterns:
+Three-stage pipeline:
 
 | Stage       | Trigger               | Actions                                                                                              |
 |-------------|-----------------------|------------------------------------------------------------------------------------------------------|
@@ -255,7 +255,7 @@ A group is scored as correct only when **both** predicted winner and runner-up m
 
 - Register at [api-sports.io](https://www.api-sports.io) for a free API key (100 req/day; instant approval)
 - Add $10 credit to Anthropic Console at [console.anthropic.com](https://console.anthropic.com)
-- Create a personal Azure subscription (separate from SHB/DLAB to avoid consuming the one-per-subscription Cosmos DB free tier)
+- Create a dedicated Azure subscription to avoid consuming the one-per-subscription Cosmos DB free tier
 - Create Cosmos DB account with free tier opt-in enabled — this must be selected at account creation time and cannot be added retroactively
 - Disable or configure aggressive sampling on Application Insights to avoid unexpected Log Analytics charges
 - Create Azure Key Vault in the same resource group as the Function App; enable system-assigned managed identity on the Function App and grant it the `Key Vault Secrets User` role
