@@ -31,7 +31,7 @@ The FIFA World Cup 2026 group stage features 48 teams across 12 groups (A–L), 
 | Event Bus    | Azure Queue Storage                      | Free (bundled with Functions storage account); decouples ingest from prediction |
 | Database     | Azure Cosmos DB — NoSQL API              | Permanent free tier: 1,000 RU/s + 25GB; schema-free JSON fits team/fixture data |
 | AI / LLM     | Anthropic Claude API (claude-haiku-4-5)  | ~$0.14 for full group stage; sufficient for structured JSON prediction tasks    |
-| Data Source  | football-data.org REST API               | Free plan covers WC fixtures, live scores, group standings                      |
+| Data Source  | API-Football v3 (api-sports.io)          | Free tier: 100 req/day; covers WC 2026 fixtures, live scores, group standings   |
 | Secrets      | Azure Key Vault                          | Managed identity access; no credentials in app settings or source control       |
 | CI/CD        | Azure DevOps Pipelines                   | Existing DLAB YAML templates reused; Bicep infra + function deploy stages       |
 | IaC          | Azure Bicep                              | Declarative provisioning of Cosmos DB, Function App, Static Web App, Key Vault  |
@@ -58,8 +58,8 @@ Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
 
 #### fn-ingest — Timer Trigger (every 6 hours)
 
-- Retrieves `FOOTBALL_DATA_API_KEY` and Cosmos DB connection string from Key Vault via managed identity
-- Calls football-data.org free API to fetch current WC fixtures and match results
+- Retrieves `APISPORTS_API_KEY` and Cosmos DB connection string from Key Vault via managed identity
+- Calls API-Football v3 (`https://v3.football.api-sports.io`) to fetch current WC fixtures and match results
 - On first run: seeds the `teams` container with all 48 teams, group assignments, FIFA rankings
 - Upserts latest fixture and result data into the `fixtures` Cosmos DB container
 - After each upsert, compares incoming `status` against the previously stored value; if any fixture transitions to `FINISHED`, enqueues a message to the `predict-trigger` Storage Queue
@@ -138,7 +138,7 @@ All runtime secrets are stored in Azure Key Vault and accessed via the Function 
 
 | Secret name              | Value                                   |
 |--------------------------|-----------------------------------------|
-| `football-data-api-key`  | football-data.org API key               |
+| `apisports-api-key`      | API-Football (api-sports.io) API key    |
 | `anthropic-api-key`      | Anthropic Claude API key                |
 | `cosmos-connection-string` | Cosmos DB primary connection string   |
 
@@ -157,13 +157,21 @@ The `infra` Bicep stage provisions the Key Vault, creates secrets, grants the Fu
 
 ## Data Model / API
 
-### football-data.org API
+### API-Football v3
 
-| Endpoint                            | Usage                                 | Free Tier Limit |
-|-------------------------------------|---------------------------------------|-----------------|
-| `GET /v4/competitions/WC/matches`   | Fetch all WC fixtures and live scores | 10 calls/minute |
-| `GET /v4/competitions/WC/standings` | Fetch group standings per matchday    | 10 calls/minute |
-| `GET /v4/competitions/WC/teams`     | Seed team metadata on first run       | 10 calls/minute |
+Base URL: `https://v3.football.api-sports.io`  
+Auth header: `x-apisports-key: {APISPORTS_API_KEY}`  
+WC 2026 identifiers: `league=1`, `season=2026`  
+Free tier: **100 requests/day** — `fn-ingest` at 6h intervals uses at most ~12 calls/day (well within limit)
+
+| Endpoint                                          | Parameters                                   | Usage                                          |
+|---------------------------------------------------|----------------------------------------------|------------------------------------------------|
+| `GET /fixtures`                                   | `league=1&season=2026&round=Group+Stage+-+N` | Fetch fixtures and live scores for a round     |
+| `GET /standings`                                  | `league=1&season=2026`                       | Fetch all 12 group tables                      |
+| `GET /teams`                                      | `league=1&season=2026`                       | Seed team metadata on first run                |
+| `GET /fixtures/rounds`                            | `league=1&season=2026`                       | Enumerate round names (returns `Group Stage - 1/2/3`) |
+
+The API's `round` field returns strings (`"Group Stage - 1"`, `"Group Stage - 2"`, `"Group Stage - 3"`). `fn-ingest` normalises these to integers `1`, `2`, `3` before writing to the `matchday` field in Cosmos DB.
 
 ### Claude API Request Shape
 
@@ -228,7 +236,7 @@ A group is scored as correct only when **both** predicted winner and runner-up m
 | Azure Functions        | 1M executions/month (permanent) | ~700 executions total | $0.00     |
 | Azure Static Web Apps  | Free hobby tier (permanent)     | Personal project      | $0.00     |
 | Claude API (Haiku 4.5) | Pay-per-use                     | ~36 prediction calls  | ~$0.14    |
-| football-data.org      | Free plan                       | ~300 API calls        | $0.00     |
+| API-Football           | 100 req/day free                | ~12 calls/day (~250 total) | $0.00 |
 | **Total**              |                                 |                       | **~$0.14** |
 
 -----
@@ -245,7 +253,7 @@ A group is scored as correct only when **both** predicted winner and runner-up m
 
 ## Setup Prerequisites
 
-- Register at [football-data.org](https://www.football-data.org) for a free API key (instant approval)
+- Register at [api-sports.io](https://www.api-sports.io) for a free API key (100 req/day; instant approval)
 - Add $10 credit to Anthropic Console at [console.anthropic.com](https://console.anthropic.com)
 - Create a personal Azure subscription (separate from SHB/DLAB to avoid consuming the one-per-subscription Cosmos DB free tier)
 - Create Cosmos DB account with free tier opt-in enabled — this must be selected at account creation time and cannot be added retroactively
@@ -259,7 +267,8 @@ A group is scored as correct only when **both** predicted winner and runner-up m
 
 | Resource                   | URL                                                                     | Purpose                             |
 |----------------------------|-------------------------------------------------------------------------|-------------------------------------|
-| football-data.org          | <https://www.football-data.org>                                         | Live WC fixture and standings data  |
+| API-Football (api-sports.io) | <https://www.api-sports.io>                                           | Live WC fixture and standings data  |
+| API-Football Docs          | <https://www.api-football.com/documentation-v3>                         | v3 endpoint reference               |
 | Anthropic Console          | <https://console.anthropic.com>                                         | Claude API access and billing       |
 | Azure Cosmos DB Free Tier  | <https://learn.microsoft.com/en-us/azure/cosmos-db/free-tier>           | Free tier eligibility and limits    |
 | Azure Functions Pricing    | <https://azure.microsoft.com/en-us/pricing/details/functions/>          | Consumption plan free grant details |
