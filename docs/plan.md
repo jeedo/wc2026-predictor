@@ -21,8 +21,8 @@
 - [x] 11. Implement `fn_predict` Queue Trigger: read `fixtures` and `teams` from Cosmos DB; build a structured prompt with group standings, team form, and FIFA rankings for all 12 groups
 - [x] 12. Extend `fn_predict`: call Claude API (`claude-haiku-4-5`) with the prompt; parse JSON response; write idempotent prediction document to `predictions` container keyed by matchday
 - [x] 13. Implement accuracy scoring in `fn_predict`: after writing predictions, compare against completed fixtures; award one point per group where **both** winner and runner-up match; write result to `scores` container
-- [ ] 14. Implement `fn_api` HTTP Trigger — `GET /groups`: query `fixtures` for latest standings grouped by group letter; return all 12 groups
-- [ ] 15. Implement `fn_api` remaining endpoints: `GET /predictions` (latest prediction doc), `GET /fixtures/{matchday}` (fixtures by matchday integer), `GET /accuracy` (latest scores doc with per-group breakdown)
+- [x] 14. Implement `fn_api` HTTP Trigger — `GET /groups`: query `fixtures` for latest standings grouped by group letter; return all 12 groups
+- [x] 15. Implement `fn_api` remaining endpoints: `GET /predictions` (latest prediction doc), `GET /fixtures/{matchday}` (fixtures by matchday integer), `GET /accuracy` (latest scores doc with per-group breakdown)
 
 ## Phase 3: API / Interface
 
