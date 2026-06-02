@@ -47,3 +47,15 @@
 - [x] 28. Add Key Vault secret provisioning to the `infra` stage: write `apisports-api-key`, `anthropic-api-key`, and `cosmos-connection-string` from Azure DevOps variable group; grant Function App managed identity `Key Vault Secrets User` role via Bicep output
 - [x] 29. Deploy to Azure via pipeline; run smoke tests: call each `fn_api` endpoint and assert HTTP 200; verify `fn_ingest` executes on schedule and writes to Cosmos DB
 - [x] 30. Cost check: after first live tournament day confirm Azure portal shows $0.00 usage across all services and Claude spend is within budget
+
+## Phase 6: Deployment Setup & Go-Live
+
+- [ ] 31. Create external service accounts: register at api-sports.io for a free API key (100 req/day, instant approval); add $10 credit at Anthropic Console and copy the API key; keep both keys ready for the ADO variable group
+- [ ] 32. Create a dedicated Azure subscription (Cosmos DB free tier is one per subscription — do not share with an existing sub); log in with `az login`; create the resource group: `az group create --name rg-wc2026 --location eastus`
+- [ ] 33. In Azure DevOps create an organisation and project; create a service connection named exactly `wc2026-service-connection` (Azure Resource Manager, scoped to the `rg-wc2026` resource group) and grant it access to all pipelines
+- [ ] 34. Create variable group `wc2026-secrets` in ADO Library; add `APISPORTS_API_KEY` and `ANTHROPIC_API_KEY` as locked secret variables; link the group to the pipeline
+- [ ] 35. Register the pipeline against `pipelines/azure-pipelines.yml` and trigger a first run — the `infra` stage provisions all Azure resources (Storage, Cosmos DB, Key Vault, Function App, Static Web App) and writes the three Key Vault secrets
+- [ ] 36. After the `infra` stage completes, retrieve the Static Web App deployment token: `az staticwebapp secrets list --name <swa-name> --resource-group rg-wc2026 --query "properties.apiKey" --output tsv`; add it as `AZURE_STATIC_WEB_APPS_API_TOKEN` in the variable group; re-run the `frontend` and `smoke` pipeline stages
+- [ ] 37. Verify portal state: Cosmos DB free tier discount shows "Applied"; four containers present (`teams`, `fixtures`, `predictions`, `scores`); Key Vault holds three secrets; Function App system-assigned managed identity is On; `KEY_VAULT_URI` appears in Function App application settings; three functions listed (`fn_ingest`, `fn_predict`, `fn_api`)
+- [ ] 38. Run smoke tests against the live Function App: `python scripts/smoke_test.py https://<func-app>.azurewebsites.net/api`; assert all four endpoints return expected HTTP status codes and response shapes
+- [ ] 39. Trigger `fn_ingest` manually and confirm 48 team documents appear in the Cosmos DB `teams` container; navigate to the Static Web App URL and verify all three views (Groups, Fixtures, Accuracy) load with no browser console errors and no CORS or 401 responses from fn-api
