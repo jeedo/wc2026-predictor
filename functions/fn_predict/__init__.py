@@ -12,6 +12,7 @@ import anthropic
 from azure.cosmos.aio import CosmosClient
 
 from shared.cosmos import upsert_item, query_items
+from fn_predict.scoring import compute_accuracy
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +24,14 @@ _MAX_TOKENS = 4096
 # Azure client factories (patched in tests)
 # ---------------------------------------------------------------------------
 
-def get_containers() -> tuple[Any, Any, Any]:
+def get_containers() -> tuple[Any, Any, Any, Any]:
     cosmos = CosmosClient.from_connection_string(os.environ["CosmosDbConnectionString"])
     db = cosmos.get_database_client(os.environ.get("COSMOS_DATABASE_NAME", "wc2026"))
     return (
         db.get_container_client("teams"),
         db.get_container_client("fixtures"),
         db.get_container_client("predictions"),
+        db.get_container_client("scores"),
     )
 
 
@@ -97,7 +99,7 @@ async def main(msg: func.QueueMessage) -> None:
     matchday: int = payload["matchday"]
     logger.info("Generating predictions for matchday %s", matchday)
 
-    teams_container, fixtures_container, predictions_container = get_containers()
+    teams_container, fixtures_container, predictions_container, scores_container = get_containers()
     claude = get_anthropic_client()
 
     teams = query_items(teams_container, "SELECT * FROM c")
@@ -114,12 +116,33 @@ async def main(msg: func.QueueMessage) -> None:
     raw_text = response.content[0].text
     predictions = _parse_claude_response(raw_text)
 
-    doc: dict[str, Any] = {
+    now = datetime.now(timezone.utc).isoformat()
+
+    prediction_doc: dict[str, Any] = {
         "id": f"prediction-md{matchday}",
         "matchday": matchday,
-        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "generatedAt": now,
         "groups": predictions,
     }
-
-    await upsert_item(predictions_container, doc)
+    await upsert_item(predictions_container, prediction_doc)
     logger.info("Wrote %d group predictions for matchday %s", len(predictions), matchday)
+
+    # Accuracy scoring against completed fixtures
+    finished_fixtures = [f for f in fixtures if f.get("status") == "FT"]
+    if finished_fixtures and predictions:
+        standings = query_items(
+            fixtures_container,
+            "SELECT * FROM c WHERE c.status = 'FT'",
+        )
+        accuracy = compute_accuracy(predictions, standings)
+        score_doc: dict[str, Any] = {
+            "id": f"score-md{matchday}",
+            "matchday": matchday,
+            "evaluatedAt": now,
+            **accuracy,
+        }
+        await upsert_item(scores_container, score_doc)
+        logger.info(
+            "Accuracy for matchday %s: %s/%s",
+            matchday, accuracy["score"], accuracy["totalGroups"],
+        )

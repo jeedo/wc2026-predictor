@@ -119,7 +119,7 @@ async def test_predict_writes_prediction_doc(queue_msg):
 
     with (
         patch("fn_predict.get_containers", return_value=(
-            mock_teams_container, mock_fixtures_container, mock_predictions_container
+            mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
         )),
         patch("fn_predict.get_anthropic_client", return_value=mock_claude),
     ):
@@ -150,7 +150,7 @@ async def test_predict_overwrites_on_second_call(queue_msg):
 
     with (
         patch("fn_predict.get_containers", return_value=(
-            mock_teams_container, mock_fixtures_container, mock_predictions_container
+            mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
         )),
         patch("fn_predict.get_anthropic_client", return_value=mock_claude),
     ):
