@@ -28,6 +28,19 @@ def query_items(
     query: str,
     parameters: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
+    """For use with the async CosmosClient (fn_ingest, fn_predict)."""
+    kwargs: dict[str, Any] = {"query": query, "enable_cross_partition_query": True}
+    if parameters:
+        kwargs["parameters"] = parameters
+    return list(container.query_items(**kwargs))
+
+
+def query_items_sync(
+    container: Any,
+    query: str,
+    parameters: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """For use with the sync CosmosClient (fn_api)."""
     kwargs: dict[str, Any] = {"query": query, "enable_cross_partition_query": True}
     if parameters:
         kwargs["parameters"] = parameters

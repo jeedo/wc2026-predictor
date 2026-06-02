@@ -9,9 +9,9 @@ from collections import defaultdict
 from typing import Any
 
 import azure.functions as func
-from azure.cosmos.aio import CosmosClient
+from azure.cosmos import CosmosClient  # sync client — fn_api is synchronous
 
-from shared.cosmos import query_items
+from shared.cosmos import query_items_sync as query_items
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,10 @@ _FIXTURE_ROUTE = re.compile(r"/api/fixtures/(\d+)$")
 # ---------------------------------------------------------------------------
 
 def get_containers() -> tuple[Any, Any, Any, Any]:
-    cosmos = CosmosClient.from_connection_string(os.environ["CosmosDbConnectionString"])
+    cosmos = CosmosClient.from_connection_string(
+        os.environ["CosmosDbConnectionString"],
+        connection_verify=True,
+    )
     db = cosmos.get_database_client(os.environ.get("COSMOS_DATABASE_NAME", "wc2026"))
     return (
         db.get_container_client("teams"),
