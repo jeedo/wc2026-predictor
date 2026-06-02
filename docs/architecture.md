@@ -32,9 +32,11 @@ The FIFA World Cup 2026 group stage features 48 teams across 12 groups (A–L), 
 | Database     | Azure Cosmos DB — NoSQL API              | Permanent free tier: 1,000 RU/s + 25GB; schema-free JSON fits team/fixture data |
 | AI / LLM     | Anthropic Claude API (claude-haiku-4-5)  | ~$0.14 for full group stage; sufficient for structured JSON prediction tasks    |
 | Data Source  | football-data.org REST API               | Free plan covers WC fixtures, live scores, group standings                      |
+| Secrets      | Azure Key Vault                          | Managed identity access; no credentials in app settings or source control       |
 | CI/CD        | Azure DevOps Pipelines                   | Existing DLAB YAML templates reused; Bicep infra + function deploy stages       |
-| IaC          | Azure Bicep                              | Declarative provisioning of Cosmos DB, Function App, Static Web App             |
+| IaC          | Azure Bicep                              | Declarative provisioning of Cosmos DB, Function App, Static Web App, Key Vault  |
 | Package Mgmt | uv (Python)                              | Consistent with DLAB toolchain; fast lockfile-based installs in pipeline        |
+| Local Dev    | Azure Functions Core Tools + Azurite     | Run functions and emulate Cosmos DB locally without Azure connectivity           |
 
 -----
 
@@ -45,16 +47,18 @@ The FIFA World Cup 2026 group stage features 48 teams across 12 groups (A–L), 
 The pipeline runs in three layers: ingestion (football-data.org → Cosmos DB), prediction (Cosmos DB → Claude API → Cosmos DB), and presentation (Cosmos DB → Azure Functions HTTP → React frontend).
 
 ```
-football-data.org  →  fn-ingest (Timer, 6h)  →  Cosmos DB
-                                              →  Storage Queue (on match finish)
-Storage Queue      →  fn-predict (Queue)      →  Claude API  →  Cosmos DB
-Cosmos DB          →  fn-api (HTTP)           →  React Static Web App
+Key Vault          →  (managed identity)      →  fn-ingest, fn-predict, fn-api
+football-data.org  →  fn-ingest (Timer, 6h)   →  Cosmos DB
+                                               →  Storage Queue (on match finish)
+Storage Queue      →  fn-predict (Queue)       →  Claude API  →  Cosmos DB
+Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
 ```
 
 ### 3.2 Azure Functions
 
 #### fn-ingest — Timer Trigger (every 6 hours)
 
+- Retrieves `FOOTBALL_DATA_API_KEY` and Cosmos DB connection string from Key Vault via managed identity
 - Calls football-data.org free API to fetch current WC fixtures and match results
 - On first run: seeds the `teams` container with all 48 teams, group assignments, FIFA rankings
 - Upserts latest fixture and result data into the `fixtures` Cosmos DB container
@@ -63,6 +67,7 @@ Cosmos DB          →  fn-api (HTTP)           →  React Static Web App
 
 #### fn-predict — Queue Trigger (`predict-trigger` queue)
 
+- Retrieves `ANTHROPIC_API_KEY` and Cosmos DB connection string from Key Vault via managed identity
 - Fires when fn-ingest enqueues a message indicating one or more matches have finished
 - Reads current `fixtures` and `teams` data from Cosmos DB
 - Constructs a structured prompt with group standings, team form, and FIFA rankings
@@ -76,7 +81,7 @@ Cosmos DB          →  fn-api (HTTP)           →  React Static Web App
 - `GET /groups` — returns all 12 groups with current standings
 - `GET /predictions` — returns latest Claude predictions with reasoning
 - `GET /fixtures/{matchday}` — returns scheduled and completed matches for a given matchday
-- `GET /accuracy` — returns prediction accuracy stats after each matchday
+- `GET /accuracy` — returns prediction accuracy stats after each matchday; a group counts as correct only if **both** predicted winner and runner-up match the actual final standings (strict scoring, max 12 points)
 
 ### 3.3 Cosmos DB Schema
 
@@ -87,7 +92,7 @@ Four containers, all using NoSQL JSON documents. Partition keys designed for poi
 | `teams`       | `/group`      | `teamId`, `name`, `group`, `fifaRanking`, `recentForm[5]`, `squadDepth`                        |
 | `fixtures`    | `/matchday`   | `fixtureId`, `matchday`, `homeTeam`, `awayTeam`, `kickoff`, `homeScore`, `awayScore`, `status` |
 | `predictions` | `/matchday`   | `predictionId`, `matchday`, `generatedAt`, `groups[{group, winner, runnerUp, reasoning}]`      |
-| `scores`      | `/matchday`   | `scoreId`, `matchday`, `evaluatedAt`, `correctWinners`, `correctRunnersUp`, `totalGroups`      |
+| `scores`      | `/matchday`   | `scoreId`, `matchday`, `evaluatedAt`, `score`, `totalGroups`, `groups[{group, correct, predictedWinner, actualWinner, predictedRunnerUp, actualRunnerUp}]` |
 
 ### 3.4 React Frontend
 
@@ -101,11 +106,11 @@ Four containers, all using NoSQL JSON documents. Partition keys designed for poi
 
 Three-stage pipeline reusing existing DLAB YAML template patterns:
 
-| Stage       | Trigger               | Actions                                                                                  |
-|-------------|-----------------------|------------------------------------------------------------------------------------------|
-| `infra`     | Push to main / manual | `az deployment` run on `main.bicep` — provisions Cosmos DB, Function App, Static Web App |
-| `functions` | Push to main          | `uv build` → zip artifact → `az functionapp deploy` to Function App                      |
-| `frontend`  | Push to main          | `npm build` → artifact → `AzureStaticWebApp@0` deploy task                               |
+| Stage       | Trigger               | Actions                                                                                              |
+|-------------|-----------------------|------------------------------------------------------------------------------------------------------|
+| `infra`     | Push to main / manual | `az deployment` run on `main.bicep` — provisions Cosmos DB, Function App, Static Web App, Key Vault  |
+| `functions` | Push to main          | `uv build` → zip artifact → `az functionapp deploy` to Function App                                  |
+| `frontend`  | Push to main          | `npm build` → artifact → `AzureStaticWebApp@0` deploy task                                           |
 
 ### 3.6 Repository Structure
 
@@ -117,6 +122,7 @@ wc2026-predictor/
 │   ├── fn_ingest/   __init__.py, function.json
 │   ├── fn_predict/  __init__.py, function.json
 │   ├── fn_api/      __init__.py, function.json
+│   ├── local.settings.json.template
 │   ├── pyproject.toml
 │   └── host.json
 ├── frontend/
@@ -125,6 +131,27 @@ wc2026-predictor/
 └── pipelines/
     └── azure-pipelines.yml
 ```
+
+### 3.7 Secret Management
+
+All runtime secrets are stored in Azure Key Vault and accessed via the Function App's system-assigned managed identity — no credentials are stored in App Settings or source control.
+
+| Secret name              | Value                                   |
+|--------------------------|-----------------------------------------|
+| `football-data-api-key`  | football-data.org API key               |
+| `anthropic-api-key`      | Anthropic Claude API key                |
+| `cosmos-connection-string` | Cosmos DB primary connection string   |
+
+The `infra` Bicep stage provisions the Key Vault, creates secrets, grants the Function App's managed identity `Key Vault Secrets User` role, and outputs the vault URI into a pipeline variable consumed by the `functions` stage.
+
+### 3.8 Local Development
+
+| Tool                       | Purpose                                              |
+|----------------------------|------------------------------------------------------|
+| Azure Functions Core Tools | Run functions locally with `func start`              |
+| Azurite                    | Emulate Cosmos DB and Queue Storage without Azure    |
+
+`functions/local.settings.json.template` is committed to source control with placeholder values. Developers copy it to `local.settings.json` (git-ignored) and fill in real keys. The `AzureWebJobsStorage` and `CosmosDbConnectionString` values point to Azurite during local runs.
 
 -----
 
@@ -155,6 +182,29 @@ wc2026-predictor/
 }
 ```
 
+### fn-api Response Shape (`GET /accuracy`)
+
+A group is scored as correct only when **both** predicted winner and runner-up match actual final standings. Maximum score is 12 (one point per group).
+
+```json
+{
+  "matchday": 2,
+  "evaluatedAt": "2026-06-22T10:00:00Z",
+  "score": 8,
+  "totalGroups": 12,
+  "groups": [
+    {
+      "group": "A",
+      "correct": true,
+      "predictedWinner": "Germany",
+      "actualWinner": "Germany",
+      "predictedRunnerUp": "Mexico",
+      "actualRunnerUp": "Mexico"
+    }
+  ]
+}
+```
+
 ### fn-api Response Shape (`GET /predictions`)
 
 ```json
@@ -173,6 +223,7 @@ wc2026-predictor/
 
 | Service                | Free Limit                      | Estimated Usage       | Est. Cost |
 |------------------------|---------------------------------|-----------------------|-----------|
+| Azure Key Vault        | 10,000 operations/month free    | ~100 secret reads     | $0.00     |
 | Azure Cosmos DB        | 1,000 RU/s + 25GB (permanent)   | <1GB, <200 RU/s       | $0.00     |
 | Azure Functions        | 1M executions/month (permanent) | ~700 executions total | $0.00     |
 | Azure Static Web Apps  | Free hobby tier (permanent)     | Personal project      | $0.00     |
@@ -199,6 +250,8 @@ wc2026-predictor/
 - Create a personal Azure subscription (separate from SHB/DLAB to avoid consuming the one-per-subscription Cosmos DB free tier)
 - Create Cosmos DB account with free tier opt-in enabled — this must be selected at account creation time and cannot be added retroactively
 - Disable or configure aggressive sampling on Application Insights to avoid unexpected Log Analytics charges
+- Create Azure Key Vault in the same resource group as the Function App; enable system-assigned managed identity on the Function App and grant it the `Key Vault Secrets User` role
+- Copy `functions/local.settings.json.template` to `functions/local.settings.json` for local development (never commit `local.settings.json`)
 
 -----
 
