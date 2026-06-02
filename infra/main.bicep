@@ -1,6 +1,9 @@
 @description('Location for all resources')
 param location string = resourceGroup().location
 
+@description('Location for Static Web App (subset of regions support the Free SKU)')
+param swaLocation string = 'eastus2'
+
 @description('Unique suffix to avoid name collisions')
 param suffix string = uniqueString(resourceGroup().id)
 
@@ -210,7 +213,7 @@ resource kvRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' =
 // ---------------------------------------------------------------------------
 resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
   name: 'swa-wc2026-${suffix}'
-  location: location
+  location: swaLocation
   sku: { name: 'Free', tier: 'Free' }
   properties: {}
 }
