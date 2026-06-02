@@ -4,6 +4,9 @@ param location string = resourceGroup().location
 @description('Location for Static Web App (subset of regions support the Free SKU)')
 param swaLocation string = 'eastus2'
 
+@description('Location for App Service Plan + Function App (needs Y1 Consumption quota)')
+param functionLocation string = 'westus2'
+
 @description('Unique suffix to avoid name collisions')
 param suffix string = uniqueString(resourceGroup().id)
 
@@ -148,7 +151,7 @@ resource secretCosmos 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 // ---------------------------------------------------------------------------
 resource hostingPlan 'Microsoft.Web/serverfarms@2023-01-01' = {
   name: 'plan-wc2026-${suffix}'
-  location: location
+  location: functionLocation
   sku: { name: 'Y1', tier: 'Dynamic' }
   properties: {}
 }
@@ -158,7 +161,7 @@ resource hostingPlan 'Microsoft.Web/serverfarms@2023-01-01' = {
 // ---------------------------------------------------------------------------
 resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
   name: 'func-wc2026-${suffix}'
-  location: location
+  location: functionLocation
   kind: 'functionapp'
   identity: { type: 'SystemAssigned' }
   properties: {
