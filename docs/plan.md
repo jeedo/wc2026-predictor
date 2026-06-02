@@ -51,7 +51,7 @@
 ## Phase 6: Deployment Setup & Go-Live
 
 - [ ] 31. Create external service accounts: register at api-sports.io for a free API key (100 req/day, instant approval); add $10 credit at Anthropic Console and copy the API key; keep both keys ready for the ADO variable group
-- [ ] 32. Create a dedicated Azure subscription (Cosmos DB free tier is one per subscription — do not share with an existing sub); log in with `az login`; create the resource group: `az group create --name rg-wc2026 --location eastus`
+- [x] 32. Create a dedicated Azure subscription (Cosmos DB free tier is one per subscription — do not share with an existing sub); log in with `az login`; create the resource group: `az group create --name rg-wc2026 --location eastus`
 - [ ] 33. In Azure DevOps create an organisation and project; create a service connection named exactly `wc2026-service-connection` (Azure Resource Manager, scoped to the `rg-wc2026` resource group) and grant it access to all pipelines
 - [ ] 34. Create variable group `wc2026-secrets` in ADO Library; add `APISPORTS_API_KEY` and `ANTHROPIC_API_KEY` as locked secret variables; link the group to the pipeline
 - [ ] 35. Register the pipeline against `pipelines/azure-pipelines.yml` and trigger a first run — the `infra` stage provisions all Azure resources (Storage, Cosmos DB, Key Vault, Function App, Static Web App) and writes the three Key Vault secrets
