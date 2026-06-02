@@ -1,0 +1,192 @@
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  - group: wc2026-secrets          # holds: APISPORTS_API_KEY, ANTHROPIC_API_KEY
+  - name: azureSubscription
+    value: wc2026-service-connection
+  - name: resourceGroup
+    value: rg-wc2026
+  - name: location
+    value: eastus
+  - name: pythonVersion
+    value: '3.11'
+
+stages:
+
+  # ---------------------------------------------------------------------------
+  # Stage 1: Infrastructure
+  # Provisions all Azure resources and writes Key Vault secrets.
+  # ---------------------------------------------------------------------------
+  - stage: infra
+    displayName: 'Deploy Infrastructure'
+    jobs:
+      - job: BicepDeploy
+        displayName: 'Bicep + Key Vault secrets'
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: AzureCLI@2
+            displayName: 'Deploy main.bicep'
+            name: BicepOutput
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+
+                OUTPUT=$(az deployment group create \
+                  --resource-group $(resourceGroup) \
+                  --template-file infra/main.bicep \
+                  --parameters \
+                      location=$(location) \
+                      apiSportsKey="$(APISPORTS_API_KEY)" \
+                      anthropicKey="$(ANTHROPIC_API_KEY)" \
+                  --query properties.outputs \
+                  --output json)
+
+                echo "##vso[task.setvariable variable=functionAppName;isOutput=true]$(echo $OUTPUT | jq -r .functionAppName.value)"
+                echo "##vso[task.setvariable variable=staticWebAppName;isOutput=true]$(echo $OUTPUT | jq -r .staticWebAppName.value)"
+                echo "##vso[task.setvariable variable=keyVaultUri;isOutput=true]$(echo $OUTPUT | jq -r .keyVaultUri.value)"
+
+          - task: AzureCLI@2
+            displayName: 'Provision Key Vault secrets'
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                KV_NAME=$(az keyvault list \
+                  --resource-group $(resourceGroup) \
+                  --query "[0].name" --output tsv)
+
+                # apisports-api-key
+                az keyvault secret set \
+                  --vault-name "$KV_NAME" \
+                  --name apisports-api-key \
+                  --value "$(APISPORTS_API_KEY)" > /dev/null
+
+                # anthropic-api-key
+                az keyvault secret set \
+                  --vault-name "$KV_NAME" \
+                  --name anthropic-api-key \
+                  --value "$(ANTHROPIC_API_KEY)" > /dev/null
+
+                # cosmos-connection-string (pulled from Cosmos account)
+                COSMOS_NAME=$(az cosmosdb list \
+                  --resource-group $(resourceGroup) \
+                  --query "[0].name" --output tsv)
+                COSMOS_CONN=$(az cosmosdb keys list \
+                  --name "$COSMOS_NAME" \
+                  --resource-group $(resourceGroup) \
+                  --type connection-strings \
+                  --query "connectionStrings[0].connectionString" \
+                  --output tsv)
+                az keyvault secret set \
+                  --vault-name "$KV_NAME" \
+                  --name cosmos-connection-string \
+                  --value "$COSMOS_CONN" > /dev/null
+
+                echo "Key Vault secrets provisioned: apisports-api-key, anthropic-api-key, cosmos-connection-string"
+
+  # ---------------------------------------------------------------------------
+  # Stage 2: Functions
+  # Packages the Python function app with uv and deploys to Azure Functions.
+  # ---------------------------------------------------------------------------
+  - stage: functions
+    displayName: 'Deploy Functions'
+    dependsOn: infra
+    variables:
+      functionAppName: $[ stageDependencies.infra.BicepDeploy.outputs['BicepOutput.functionAppName'] ]
+    jobs:
+      - job: FunctionsDeploy
+        displayName: 'uv build + az functionapp deploy'
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(pythonVersion)
+
+          - script: |
+              curl -LsSf https://astral.sh/uv/install.sh | sh
+              echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+              export PATH="$HOME/.cargo/bin:$PATH"
+              uv --version
+            displayName: 'Install uv'
+
+          - script: |
+              export PATH="$HOME/.cargo/bin:$PATH"
+              cd functions
+              uv sync --no-dev
+            displayName: 'Install Python dependencies'
+
+          - script: |
+              cd functions
+              zip -r ../functions.zip . \
+                --exclude "*.pyc" \
+                --exclude "__pycache__/*" \
+                --exclude ".venv/*" \
+                --exclude "tests/*" \
+                --exclude "*.lock"
+            displayName: 'Zip function app'
+
+          - task: AzureCLI@2
+            displayName: 'Deploy to Azure Functions'
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                az functionapp deploy \
+                  --resource-group $(resourceGroup) \
+                  --name "$(functionAppName)" \
+                  --src-path functions.zip \
+                  --type zip \
+                  --async false
+
+  # ---------------------------------------------------------------------------
+  # Stage 3: Frontend
+  # Builds the React/Vite app and publishes to Azure Static Web Apps.
+  # ---------------------------------------------------------------------------
+  - stage: frontend
+    displayName: 'Deploy Frontend'
+    dependsOn: functions
+    variables:
+      staticWebAppName: $[ stageDependencies.infra.BicepDeploy.outputs['BicepOutput.staticWebAppName'] ]
+    jobs:
+      - job: FrontendDeploy
+        displayName: 'npm build + AzureStaticWebApp deploy'
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: NodeTool@0
+            inputs:
+              versionSpec: '20.x'
+
+          - script: |
+              cd frontend
+              npm ci
+            displayName: 'Install npm dependencies'
+
+          - script: |
+              cd frontend
+              FUNC_APP="$(functionAppName)"
+              export VITE_API_BASE_URL="https://${FUNC_APP}.azurewebsites.net/api"
+              npm run build
+            displayName: 'Build React app (inject VITE_API_BASE_URL)'
+            env:
+              functionAppName: $(functionAppName)
+
+          - task: AzureStaticWebApp@0
+            displayName: 'Publish to Static Web App'
+            inputs:
+              azure_static_web_apps_api_token: $(AZURE_STATIC_WEB_APPS_API_TOKEN)
+              app_location: frontend
+              output_location: dist
+              skip_app_build: true
