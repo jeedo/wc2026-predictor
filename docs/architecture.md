@@ -27,7 +27,8 @@ The FIFA World Cup 2026 group stage features 48 teams across 12 groups (A–L), 
 | Frontend     | Azure Static Web Apps (React)            | Free hobby tier; deploys from Azure DevOps; no server management                |
 | API Layer    | Azure Functions — HTTP Trigger (Python)  | Serverless; 1M free executions/month; familiar from DLAB pipelines              |
 | Ingestion    | Azure Functions — Timer Trigger (Python) | Cron-scheduled every 6h during tournament window; zero cost at this scale       |
-| Prediction   | Azure Functions — Timer Trigger (Python) | Daily prediction refresh via Claude API; decoupled from ingestion               |
+| Prediction   | Azure Functions — Queue Trigger (Python) | Triggered by fn-ingest via Storage Queue when matches finish; event-driven      |
+| Event Bus    | Azure Queue Storage                      | Free (bundled with Functions storage account); decouples ingest from prediction |
 | Database     | Azure Cosmos DB — NoSQL API              | Permanent free tier: 1,000 RU/s + 25GB; schema-free JSON fits team/fixture data |
 | AI / LLM     | Anthropic Claude API (claude-haiku-4-5)  | ~$0.14 for full group stage; sufficient for structured JSON prediction tasks    |
 | Data Source  | football-data.org REST API               | Free plan covers WC fixtures, live scores, group standings                      |
@@ -44,9 +45,10 @@ The FIFA World Cup 2026 group stage features 48 teams across 12 groups (A–L), 
 The pipeline runs in three layers: ingestion (football-data.org → Cosmos DB), prediction (Cosmos DB → Claude API → Cosmos DB), and presentation (Cosmos DB → Azure Functions HTTP → React frontend).
 
 ```
-football-data.org  →  fn-ingest (Timer, 6h)     →  Cosmos DB
-Cosmos DB          →  fn-predict (Timer, daily)  →  Claude API  →  Cosmos DB
-Cosmos DB          →  fn-api (HTTP)              →  React Static Web App
+football-data.org  →  fn-ingest (Timer, 6h)  →  Cosmos DB
+                                              →  Storage Queue (on match finish)
+Storage Queue      →  fn-predict (Queue)      →  Claude API  →  Cosmos DB
+Cosmos DB          →  fn-api (HTTP)           →  React Static Web App
 ```
 
 ### 3.2 Azure Functions
@@ -56,14 +58,17 @@ Cosmos DB          →  fn-api (HTTP)              →  React Static Web App
 - Calls football-data.org free API to fetch current WC fixtures and match results
 - On first run: seeds the `teams` container with all 48 teams, group assignments, FIFA rankings
 - Upserts latest fixture and result data into the `fixtures` Cosmos DB container
+- After each upsert, compares incoming `status` against the previously stored value; if any fixture transitions to `FINISHED`, enqueues a message to the `predict-trigger` Storage Queue
 - Runs only during the tournament window (June 12 – July 2) to conserve executions
 
-#### fn-predict — Timer Trigger (daily, post-match)
+#### fn-predict — Queue Trigger (`predict-trigger` queue)
 
+- Fires when fn-ingest enqueues a message indicating one or more matches have finished
 - Reads current `fixtures` and `teams` data from Cosmos DB
 - Constructs a structured prompt with group standings, team form, and FIFA rankings
 - Calls Claude API (`claude-haiku-4-5`) requesting JSON output: group winner, runner-up, reasoning per group
 - Writes prediction documents to the `predictions` container, versioned by matchday
+- Idempotent: if multiple messages arrive for the same matchday (e.g. two matches finish in the same 6h window), the latest run overwrites the previous prediction document
 
 #### fn-api — HTTP Trigger
 
@@ -182,7 +187,7 @@ wc2026-predictor/
 | Function     | Schedule                             | Purpose                                                         |
 |--------------|--------------------------------------|-----------------------------------------------------------------|
 | `fn-ingest`  | Every 6 hours, June 12 – July 2      | Fetch latest match results and standings from football-data.org |
-| `fn-predict` | Daily at 08:00 UTC, June 12 – July 2 | Regenerate predictions based on latest Cosmos DB data           |
+| `fn-predict` | On match finish (Queue trigger)       | Regenerate predictions whenever fn-ingest detects a FINISHED match |
 | `fn-api`     | On-demand HTTP                       | Serve frontend requests; no schedule                            |
 
 -----
