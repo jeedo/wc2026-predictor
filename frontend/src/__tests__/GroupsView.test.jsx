@@ -18,6 +18,23 @@ const PREDICTIONS = {
   ],
 }
 
+const PREDICTIONS_WITH_MATCHES = {
+  matchday: 1,
+  generatedAt: '2026-06-12T10:00:00Z',
+  groups: [
+    {
+      group: 'A',
+      winner: 'Germany',
+      runnerUp: 'Mexico',
+      reasoning: 'Strong FIFA ranking.',
+      matches: [
+        { homeTeam: 'Germany', awayTeam: 'Mexico', matchday: 1, predictedHomeScore: 2, predictedAwayScore: 1 },
+        { homeTeam: 'Germany', awayTeam: 'Poland', matchday: 2, predictedHomeScore: 1, predictedAwayScore: 0 },
+      ],
+    },
+  ],
+}
+
 const NOT_FOUND = { ok: false, status: 404, json: () => Promise.resolve({ error: 'Not found' }) }
 
 afterEach(() => vi.restoreAllMocks())
@@ -55,4 +72,29 @@ test('shows error when groups fetch fails', async () => {
   vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
   render(<GroupsView />)
   await waitFor(() => expect(screen.getByText(/error/i)).toBeInTheDocument())
+})
+
+test('shows individual match predictions when matches are present', async () => {
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(GROUPS_DATA) })
+    .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(PREDICTIONS_WITH_MATCHES) }))
+  render(<GroupsView />)
+  await waitFor(() => {
+    // Score display for a predicted match
+    expect(screen.getByText(/2\s*[–-]\s*1/)).toBeInTheDocument()
+    // Match heading
+    expect(screen.getByText(/match predictions/i)).toBeInTheDocument()
+  })
+})
+
+test('shows no match predictions section when matches array is absent', async () => {
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(GROUPS_DATA) })
+    .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(PREDICTIONS) }))
+  render(<GroupsView />)
+  await waitFor(() => {
+    expect(screen.getByText('Germany')).toBeInTheDocument()
+    // No score dashes when there are no match predictions
+    expect(screen.queryByText(/\d\s*[–-]\s*\d/)).not.toBeInTheDocument()
+  })
 })

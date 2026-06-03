@@ -51,12 +51,28 @@ def _build_prompt(teams: list[dict[str, Any]], fixtures: list[dict[str, Any]]) -
         groups[team.get("group", "?")].append(team)
 
     completed = [f for f in fixtures if f.get("status") == "FT"]
+    upcoming = [f for f in fixtures if f.get("status") not in ("FT", "1H", "2H", "HT", "ET", "P")]
+
+    # Group upcoming fixtures by group letter via team lookup
+    team_to_group: dict[str, str] = {t["name"]: t.get("group", "?") for t in teams}
+    upcoming_by_group: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for f in upcoming:
+        g = team_to_group.get(f.get("homeTeam", ""), "?")
+        upcoming_by_group[g].append(f)
+
+    schema = (
+        '{"predictions": ['
+        '{"group": "A", "winner": "...", "runnerUp": "...", "reasoning": "...", '
+        '"matches": [{"homeTeam": "...", "awayTeam": "...", "matchday": 1, '
+        '"predictedHomeScore": 0, "predictedAwayScore": 0}]}'
+        ']}'
+    )
 
     lines = [
         "You are a football analyst. Predict the FIFA World Cup 2026 group stage outcomes.",
-        "For each group, predict the winner and runner-up based on the data below.",
+        "For each group, predict: the winner, runner-up, and the score of every upcoming fixture.",
         "Respond ONLY with valid JSON matching this schema exactly:",
-        '{"predictions": [{"group": "A", "winner": "...", "runnerUp": "...", "reasoning": "..."}]}',
+        schema,
         "",
         "GROUP DATA:",
     ]
@@ -72,6 +88,13 @@ def _build_prompt(teams: list[dict[str, Any]], fixtures: list[dict[str, Any]]) -
         for f in completed:
             lines.append(
                 f"  {f['homeTeam']} {f['homeScore']}–{f['awayScore']} {f['awayTeam']} (MD{f['matchday']})"
+            )
+
+    if upcoming:
+        lines.append("\nUPCOMING FIXTURES (predict scores for each):")
+        for f in upcoming:
+            lines.append(
+                f"  MD{f['matchday']}: {f['homeTeam']} vs {f['awayTeam']}"
             )
 
     return "\n".join(lines)

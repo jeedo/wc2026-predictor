@@ -62,6 +62,33 @@ def test_build_prompt_includes_completed_results():
     assert "2" in prompt
 
 
+def test_build_prompt_includes_upcoming_fixtures():
+    upcoming = [_make_fixture(1, "Germany", "Mexico", "NS")]
+    teams = [_make_team("A", "Germany"), _make_team("A", "Mexico")]
+    prompt = _build_prompt(teams=teams, fixtures=upcoming)
+    assert "Germany" in prompt
+    assert "Mexico" in prompt
+    # Should mention upcoming matches so Claude can predict them
+    assert "UPCOMING" in prompt.upper() or "SCHEDULED" in prompt.upper() or "FIXTURE" in prompt.upper()
+
+
+def test_build_prompt_schema_includes_matches():
+    teams = [_make_team("A", "Germany"), _make_team("A", "Mexico")]
+    prompt = _build_prompt(teams=teams, fixtures=[])
+    # Prompt schema must instruct Claude to return match-level predictions
+    assert "matches" in prompt
+
+
+def test_build_prompt_includes_fixture_teams():
+    fixtures = [
+        _make_fixture(1, "Germany", "Mexico", "NS"),
+        _make_fixture(2, "Germany", "Poland", "NS"),
+    ]
+    teams = [_make_team("A", "Germany"), _make_team("A", "Mexico"), _make_team("A", "Poland")]
+    prompt = _build_prompt(teams=teams, fixtures=fixtures)
+    assert "Poland" in prompt
+
+
 # ---------------------------------------------------------------------------
 # _parse_claude_response
 # ---------------------------------------------------------------------------
@@ -88,6 +115,27 @@ def test_parse_malformed_response_returns_empty():
 def test_parse_missing_predictions_key_returns_empty():
     result = _parse_claude_response('{"wrong_key": []}')
     assert result == []
+
+
+def test_parse_response_preserves_matches():
+    response = json.dumps({
+        "predictions": [
+            {
+                "group": "A",
+                "winner": "Germany",
+                "runnerUp": "Mexico",
+                "reasoning": "Strong",
+                "matches": [
+                    {"homeTeam": "Germany", "awayTeam": "Mexico", "matchday": 1,
+                     "predictedHomeScore": 2, "predictedAwayScore": 1}
+                ],
+            }
+        ]
+    })
+    result = _parse_claude_response(response)
+    assert len(result) == 1
+    assert "matches" in result[0]
+    assert result[0]["matches"][0]["predictedHomeScore"] == 2
 
 
 # ---------------------------------------------------------------------------
