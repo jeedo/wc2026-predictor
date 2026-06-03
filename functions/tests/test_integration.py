@@ -80,22 +80,29 @@ class InMemQueue:
 # ---------------------------------------------------------------------------
 
 STUB_TEAMS = [
-    {"team": {"id": i, "name": f"Team{chr(64 + ((i-1)//4 + 1))}{((i-1) % 4) + 1}"}, "venue": {}}
+    {"id": i, "name": f"Team{chr(64 + ((i-1)//4 + 1))}{((i-1) % 4) + 1}",
+     "group": chr(64 + ((i-1)//4 + 1))}
     for i in range(1, 49)
 ]
 
 STUB_FIXTURE_NS = {
-    "fixture": {"id": 1001, "date": "2026-06-12T15:00:00+00:00", "status": {"short": "NS"}},
-    "teams": {"home": {"id": 1, "name": "TeamA1"}, "away": {"id": 2, "name": "TeamA2"}},
-    "goals": {"home": None, "away": None},
+    "id": 1001,
+    "utcDate": "2026-06-12T15:00:00Z",
+    "status": "SCHEDULED",
     "matchday": 1,
+    "homeTeam": {"id": 1, "name": "TeamA1"},
+    "awayTeam": {"id": 2, "name": "TeamA2"},
+    "score": {"fullTime": {"home": None, "away": None}},
 }
 
 STUB_FIXTURE_FT = {
-    "fixture": {"id": 1001, "date": "2026-06-12T15:00:00+00:00", "status": {"short": "FT"}},
-    "teams": {"home": {"id": 1, "name": "TeamA1"}, "away": {"id": 2, "name": "TeamA2"}},
-    "goals": {"home": 2, "away": 0},
+    "id": 1001,
+    "utcDate": "2026-06-12T15:00:00Z",
+    "status": "FINISHED",
     "matchday": 1,
+    "homeTeam": {"id": 1, "name": "TeamA1"},
+    "awayTeam": {"id": 2, "name": "TeamA2"},
+    "score": {"fullTime": {"home": 2, "away": 0}},
 }
 
 CLAUDE_STUB = json.dumps({
@@ -123,9 +130,9 @@ async def test_ingest_seeds_teams_and_upserts_fixture():
     with (
         patch("fn_ingest.get_containers", return_value=(teams_db, fixtures_db)),
         patch("fn_ingest.get_queue_client", return_value=queue),
-        patch("fn_ingest.ApiFootballClient.from_env", return_value=MagicMock()),
-        patch("fn_ingest.fetch_teams", AsyncMock(return_value=STUB_TEAMS)),
-        patch("fn_ingest.fetch_fixtures", side_effect=_fixtures_stub),
+        patch("fn_ingest.FootballDataClient.from_env", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=STUB_TEAMS)),
+        patch("fn_ingest.fetch_matches_fd", side_effect=_fixtures_stub),
     ):
         from fn_ingest import main as ingest_main
         await ingest_main(MagicMock(past_due=False))
@@ -157,9 +164,9 @@ async def test_ingest_enqueues_message_on_finish():
     with (
         patch("fn_ingest.get_containers", return_value=(teams_db, fixtures_db)),
         patch("fn_ingest.get_queue_client", return_value=queue),
-        patch("fn_ingest.ApiFootballClient.from_env", return_value=MagicMock()),
-        patch("fn_ingest.fetch_teams", AsyncMock(return_value=[])),
-        patch("fn_ingest.fetch_fixtures", side_effect=_ft_stub),
+        patch("fn_ingest.FootballDataClient.from_env", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_matches_fd", side_effect=_ft_stub),
     ):
         from fn_ingest import main as ingest_main
         await ingest_main(MagicMock(past_due=False))
@@ -267,9 +274,9 @@ async def test_full_pipeline_end_to_end():
     with (
         patch("fn_ingest.get_containers", return_value=(teams_db, fixtures_db)),
         patch("fn_ingest.get_queue_client", return_value=queue),
-        patch("fn_ingest.ApiFootballClient.from_env", return_value=MagicMock()),
-        patch("fn_ingest.fetch_teams", AsyncMock(return_value=STUB_TEAMS)),
-        patch("fn_ingest.fetch_fixtures", side_effect=_fixtures_stub),
+        patch("fn_ingest.FootballDataClient.from_env", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=STUB_TEAMS)),
+        patch("fn_ingest.fetch_matches_fd", side_effect=_fixtures_stub),
     ):
         from fn_ingest import main as ingest_main
         await ingest_main(MagicMock(past_due=False))

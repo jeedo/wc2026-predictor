@@ -1,5 +1,4 @@
-"""fn_ingest — Timer Trigger: fetch fixtures from API-Football, seed teams,
-upsert to Cosmos DB, and enqueue a message when a match finishes."""
+"""fn_ingest — Timer Trigger: fetch fixtures, seed teams, and enqueue on FINISHED."""
 from __future__ import annotations
 
 import json
@@ -12,12 +11,7 @@ import httpx
 from azure.cosmos.aio import CosmosClient
 from azure.storage.queue.aio import QueueClient
 
-from shared.api_football import (
-    ApiFootballClient,
-    fetch_fixtures,
-    fetch_teams,
-    normalise_round,
-)
+from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd
 from shared.cosmos import upsert_item, query_items, read_item
 
 logger = logging.getLogger(__name__)
@@ -34,30 +28,37 @@ def _should_enqueue(old_status: str | None, new_status: str) -> bool:
 
 
 def _build_fixture_doc(raw: dict[str, Any]) -> dict[str, Any]:
-    fixture = raw["fixture"]
+    """Normalise a football-data.org match record to our schema."""
+    score = raw.get("score", {})
+    ft = score.get("fullTime", {})
+    status_map = {"FINISHED": "FT", "IN_PLAY": "1H", "PAUSED": "HT",
+                  "TIMED": "NS", "SCHEDULED": "NS"}
+    status_raw = raw.get("status", "NS")
     return {
-        "id": f"fixture-{fixture['id']}",
-        "fixtureId": fixture["id"],
-        "matchday": raw["matchday"],
-        "kickoff": fixture["date"],
-        "status": fixture["status"]["short"],
-        "homeTeam": raw["teams"]["home"]["name"],
-        "homeTeamId": raw["teams"]["home"]["id"],
-        "awayTeam": raw["teams"]["away"]["name"],
-        "awayTeamId": raw["teams"]["away"]["id"],
-        "homeScore": raw["goals"]["home"],
-        "awayScore": raw["goals"]["away"],
+        "id": f"fixture-{raw['id']}",
+        "fixtureId": raw["id"],
+        "matchday": raw.get("matchday", 1),
+        "kickoff": raw.get("utcDate", ""),
+        "status": status_map.get(status_raw, status_raw),
+        "homeTeam": raw["homeTeam"]["name"],
+        "homeTeamId": raw["homeTeam"]["id"],
+        "awayTeam": raw["awayTeam"]["name"],
+        "awayTeamId": raw["awayTeam"]["id"],
+        "homeScore": ft.get("home"),
+        "awayScore": ft.get("away"),
     }
 
 
 def _build_team_doc(raw: dict[str, Any]) -> dict[str, Any]:
-    team = raw["team"]
+    """Normalise a football-data.org team record to our schema."""
     return {
-        "id": f"team-{team['id']}",
-        "teamId": team["id"],
-        "name": team["name"],
-        "group": raw.get("group", "Unknown"),
-        "fifaRanking": raw.get("fifaRanking"),
+        "id": f"team-{raw['id']}",
+        "teamId": raw["id"],
+        "name": raw["name"],
+        "shortName": raw.get("shortName", raw["name"]),
+        "crestUrl": raw.get("crest", ""),
+        "group": raw.get("group") or "Unknown",
+        "fifaRanking": None,
         "recentForm": [],
         "squadDepth": None,
     }
@@ -90,20 +91,20 @@ async def main(mytimer: func.TimerRequest) -> None:
 
     teams_container, fixtures_container = get_containers()
     queue = get_queue_client()
-    api = ApiFootballClient.from_env()
+    api = FootballDataClient.from_env()
 
     async with httpx.AsyncClient() as http:
         # Seed teams on first run (container empty)
         existing = await query_items(teams_container, "SELECT VALUE COUNT(1) FROM c")
         if not existing or existing[0] == 0:
-            raw_teams = await fetch_teams(api, http)
+            raw_teams = await fetch_teams_fd(api, http)
             for raw in raw_teams:
                 await upsert_item(teams_container, _build_team_doc(raw))
             logger.info("Seeded %d teams", len(raw_teams))
 
         # Fetch and upsert fixtures for all three matchdays
         for matchday in _MATCHDAYS:
-            raw_fixtures = await fetch_fixtures(api, http, matchday)
+            raw_fixtures = await fetch_matches_fd(api, http, matchday)
             for raw in raw_fixtures:
                 doc = _build_fixture_doc(raw)
                 fixture_id = doc["id"]

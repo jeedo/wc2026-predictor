@@ -44,17 +44,13 @@ def test_should_enqueue_true_on_first_insert_finished():
 # ---------------------------------------------------------------------------
 def test_build_fixture_doc_fields():
     raw = {
-        "fixture": {
-            "id": 101,
-            "date": "2026-06-12T15:00:00+00:00",
-            "status": {"short": "FT"},
-        },
-        "teams": {
-            "home": {"id": 1, "name": "Germany"},
-            "away": {"id": 2, "name": "Mexico"},
-        },
-        "goals": {"home": 2, "away": 0},
+        "id": 101,
+        "utcDate": "2026-06-12T15:00:00Z",
+        "status": "FINISHED",
         "matchday": 1,
+        "homeTeam": {"id": 1, "name": "Germany"},
+        "awayTeam": {"id": 2, "name": "Mexico"},
+        "score": {"fullTime": {"home": 2, "away": 0}},
     }
     doc = _build_fixture_doc(raw)
     assert doc["id"] == "fixture-101"
@@ -85,7 +81,7 @@ async def test_ingest_seeds_teams_on_first_run():
     mock_queue = AsyncMock()
 
     fake_teams = [
-        {"team": {"id": i, "name": f"Team{i}"}, "venue": {}}
+        {"id": i, "name": f"Team{i}", "group": "A"}
         for i in range(1, 5)
     ]
     fake_fixtures: list = []
@@ -93,9 +89,9 @@ async def test_ingest_seeds_teams_on_first_run():
     with (
         patch("fn_ingest.get_containers", return_value=(mock_teams_container, mock_fixtures_container)),
         patch("fn_ingest.get_queue_client", return_value=mock_queue),
-        patch("fn_ingest.ApiFootballClient.from_env", return_value=MagicMock()),
-        patch("fn_ingest.fetch_teams", AsyncMock(return_value=fake_teams)),
-        patch("fn_ingest.fetch_fixtures", AsyncMock(return_value=fake_fixtures)),
+        patch("fn_ingest.FootballDataClient.from_env", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=fake_teams)),
+        patch("fn_ingest.fetch_matches_fd", AsyncMock(return_value=fake_fixtures)),
     ):
         await ingest_main(timer)
 
@@ -120,17 +116,13 @@ async def test_ingest_enqueues_on_finished_transition():
     mock_queue.send_message = AsyncMock()
 
     finished_fixture = {
-        "fixture": {
-            "id": 101,
-            "date": "2026-06-12T15:00:00+00:00",
-            "status": {"short": "FT"},
-        },
-        "teams": {
-            "home": {"id": 1, "name": "Germany"},
-            "away": {"id": 2, "name": "Mexico"},
-        },
-        "goals": {"home": 2, "away": 0},
+        "id": 101,
+        "utcDate": "2026-06-12T15:00:00Z",
+        "status": "FINISHED",
         "matchday": 1,
+        "homeTeam": {"id": 1, "name": "Germany"},
+        "awayTeam": {"id": 2, "name": "Mexico"},
+        "score": {"fullTime": {"home": 2, "away": 0}},
     }
 
     async def _fixtures_by_matchday(_api, _http, matchday):
@@ -139,9 +131,9 @@ async def test_ingest_enqueues_on_finished_transition():
     with (
         patch("fn_ingest.get_containers", return_value=(mock_teams_container, mock_fixtures_container)),
         patch("fn_ingest.get_queue_client", return_value=mock_queue),
-        patch("fn_ingest.ApiFootballClient.from_env", return_value=MagicMock()),
-        patch("fn_ingest.fetch_teams", AsyncMock(return_value=[])),
-        patch("fn_ingest.fetch_fixtures", side_effect=_fixtures_by_matchday),
+        patch("fn_ingest.FootballDataClient.from_env", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_matches_fd", side_effect=_fixtures_by_matchday),
     ):
         await ingest_main(timer)
 

@@ -18,6 +18,10 @@ param apiSportsKey string
 @secure()
 param anthropicKey string
 
+@description('football-data.org API key')
+@secure()
+param footballDataKey string
+
 // ---------------------------------------------------------------------------
 // Storage Account (required by Azure Functions)
 // ---------------------------------------------------------------------------
@@ -138,6 +142,12 @@ resource secretAnthropic 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   properties: { value: anthropicKey }
 }
 
+resource secretFootballData 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'football-data-api-key'
+  properties: { value: footballDataKey }
+}
+
 resource secretCosmos 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: keyVault
   name: 'cosmos-connection-string'
@@ -205,6 +215,10 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
         {
           name: 'ANTHROPIC_API_KEY'
           value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/anthropic-api-key/)'
+        }
+        {
+          name: 'FOOTBALL_DATA_API_KEY'
+          value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/football-data-api-key/)'
         }
       ]
     }

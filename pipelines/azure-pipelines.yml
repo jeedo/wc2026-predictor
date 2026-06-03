@@ -45,6 +45,7 @@ stages:
                       location=$(location) \
                       apiSportsKey="$(APISPORTS_API_KEY)" \
                       anthropicKey="$(ANTHROPIC_API_KEY)" \
+                      footballDataKey="$(FOOTBALL_DATA_API_KEY)" \
                   --query properties.outputs \
                   --output json)
 
@@ -75,6 +76,12 @@ stages:
                   --vault-name "$KV_NAME" \
                   --name anthropic-api-key \
                   --value "$(ANTHROPIC_API_KEY)" > /dev/null
+
+                # football-data-api-key
+                az keyvault secret set \
+                  --vault-name "$KV_NAME" \
+                  --name football-data-api-key \
+                  --value "$(FOOTBALL_DATA_API_KEY)" > /dev/null
 
                 # cosmos-connection-string (pulled from Cosmos account)
                 COSMOS_NAME=$(az cosmosdb list \
