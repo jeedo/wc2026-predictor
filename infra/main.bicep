@@ -22,6 +22,10 @@ param anthropicKey string
 @secure()
 param footballDataKey string
 
+@description('SerpAPI key for search news')
+@secure()
+param serpaKey string
+
 // ---------------------------------------------------------------------------
 // Storage Account (required by Azure Functions)
 // ---------------------------------------------------------------------------
@@ -148,6 +152,12 @@ resource secretFootballData 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   properties: { value: footballDataKey }
 }
 
+resource secretSerpa 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'serpa-api-key'
+  properties: { value: serpaKey }
+}
+
 resource secretCosmos 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: keyVault
   name: 'cosmos-connection-string'
@@ -219,6 +229,10 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
         {
           name: 'FOOTBALL_DATA_API_KEY'
           value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/football-data-api-key/)'
+        }
+        {
+          name: 'SERPA_API_KEY'
+          value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/serpa-api-key/)'
         }
       ]
     }
