@@ -118,14 +118,19 @@ async def main(mytimer: func.TimerRequest) -> None:
     if mytimer.past_due:
         logger.warning("Timer trigger is past due")
 
-    teams_container, fixtures_container = get_containers()
-    queue = get_queue_client()
-
     try:
-        api_key = _get_football_data_api_key()
-        api = FootballDataClient(api_key=api_key)
+        teams_container, fixtures_container = get_containers()
+        queue = get_queue_client()
+
+        try:
+            api_key = _get_football_data_api_key()
+            api = FootballDataClient(api_key=api_key)
+            logger.info("Football-data API client initialized")
+        except Exception as e:
+            logger.error("Failed to get football-data API key: %s", str(e), exc_info=True)
+            raise
     except Exception as e:
-        logger.error("Failed to get football-data API key: %s", e)
+        logger.error("Fatal error in fn_ingest: %s", str(e), exc_info=True)
         raise
 
     async with httpx.AsyncClient() as http:
