@@ -130,7 +130,8 @@ async def test_ingest_seeds_teams_and_upserts_fixture():
     with (
         patch("fn_ingest.get_containers", return_value=(teams_db, fixtures_db)),
         patch("fn_ingest.get_queue_client", return_value=queue),
-        patch("fn_ingest.FootballDataClient.from_env", return_value=MagicMock()),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=STUB_TEAMS)),
         patch("fn_ingest.fetch_matches_fd", side_effect=_fixtures_stub),
     ):
@@ -164,7 +165,8 @@ async def test_ingest_enqueues_message_on_finish():
     with (
         patch("fn_ingest.get_containers", return_value=(teams_db, fixtures_db)),
         patch("fn_ingest.get_queue_client", return_value=queue),
-        patch("fn_ingest.FootballDataClient.from_env", return_value=MagicMock()),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_matches_fd", side_effect=_ft_stub),
     ):
@@ -274,7 +276,8 @@ async def test_full_pipeline_end_to_end():
     with (
         patch("fn_ingest.get_containers", return_value=(teams_db, fixtures_db)),
         patch("fn_ingest.get_queue_client", return_value=queue),
-        patch("fn_ingest.FootballDataClient.from_env", return_value=MagicMock()),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=STUB_TEAMS)),
         patch("fn_ingest.fetch_matches_fd", side_effect=_fixtures_stub),
     ):

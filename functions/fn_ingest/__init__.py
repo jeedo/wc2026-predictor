@@ -10,6 +10,8 @@ import azure.functions as func
 import httpx
 from azure.cosmos.aio import CosmosClient
 from azure.storage.queue.aio import QueueClient
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
 
 from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd
 from shared.cosmos import upsert_item, query_items, read_item
@@ -17,6 +19,33 @@ from shared.cosmos import upsert_item, query_items, read_item
 logger = logging.getLogger(__name__)
 
 _MATCHDAYS = [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# Environment & secrets
+# ---------------------------------------------------------------------------
+
+def _get_football_data_api_key() -> str:
+    """Read FOOTBALL_DATA_API_KEY from env or Key Vault.
+
+    On Linux Consumption, KV references may not auto-resolve.
+    Fall back to explicit SDK access if env var is a KV reference string.
+    """
+    val = os.environ.get("FOOTBALL_DATA_API_KEY", "")
+
+    # If it's already a real key, use it
+    if val and not val.startswith("@Microsoft.KeyVault"):
+        return val
+
+    # Otherwise, read directly from Key Vault
+    kv_uri = os.environ.get("KEY_VAULT_URI")
+    if not kv_uri:
+        raise ValueError("FOOTBALL_DATA_API_KEY and KEY_VAULT_URI not set")
+
+    cred = DefaultAzureCredential()
+    client = SecretClient(vault_url=kv_uri, credential=cred)
+    secret = client.get_secret("football-data-api-key")
+    return secret.value
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +120,13 @@ async def main(mytimer: func.TimerRequest) -> None:
 
     teams_container, fixtures_container = get_containers()
     queue = get_queue_client()
-    api = FootballDataClient.from_env()
+
+    try:
+        api_key = _get_football_data_api_key()
+        api = FootballDataClient(api_key=api_key)
+    except Exception as e:
+        logger.error("Failed to get football-data API key: %s", e)
+        raise
 
     async with httpx.AsyncClient() as http:
         # Seed teams on first run (container empty)

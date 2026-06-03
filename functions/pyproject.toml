@@ -7,6 +7,8 @@ dependencies = [
     "anthropic>=0.105.2",
     "azure-cosmos>=4.16.1",
     "azure-functions>=1.24.0",
+    "azure-identity>=1.25.3",
+    "azure-keyvault-secrets>=4.11.0",
     "azure-storage-queue>=12.16.0",
     "httpx>=0.28.1",
 ]

@@ -89,7 +89,8 @@ async def test_ingest_seeds_teams_on_first_run():
     with (
         patch("fn_ingest.get_containers", return_value=(mock_teams_container, mock_fixtures_container)),
         patch("fn_ingest.get_queue_client", return_value=mock_queue),
-        patch("fn_ingest.FootballDataClient.from_env", return_value=MagicMock()),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=fake_teams)),
         patch("fn_ingest.fetch_matches_fd", AsyncMock(return_value=fake_fixtures)),
     ):
@@ -131,7 +132,8 @@ async def test_ingest_enqueues_on_finished_transition():
     with (
         patch("fn_ingest.get_containers", return_value=(mock_teams_container, mock_fixtures_container)),
         patch("fn_ingest.get_queue_client", return_value=mock_queue),
-        patch("fn_ingest.FootballDataClient.from_env", return_value=MagicMock()),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_matches_fd", side_effect=_fixtures_by_matchday),
     ):
