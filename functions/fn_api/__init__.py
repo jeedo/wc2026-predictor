@@ -12,7 +12,6 @@ from typing import Any
 
 import azure.functions as func
 from azure.cosmos import CosmosClient  # sync client — fn_api is synchronous
-from azure.storage.queue import QueueClient  # DEBUG: test if this import causes the issue
 
 from shared.cosmos import query_items_sync as query_items
 from shared.usage_tracker import PROVIDER_LIMITS
@@ -38,14 +37,6 @@ def get_containers() -> tuple[Any, Any, Any, Any, Any]:
         db.get_container_client("predictions"),
         db.get_container_client("scores"),
         db.get_container_client("usage"),
-    )
-
-
-def get_queue_client() -> QueueClient:
-    """DEBUG: Test if this function causes issues."""
-    return QueueClient.from_connection_string(
-        os.environ["AzureWebJobsStorage"],
-        queue_name=os.environ.get("PREDICT_QUEUE_NAME", "predict-trigger"),
     )
 
 
@@ -193,15 +184,6 @@ def _json_404(message: str) -> func.HttpResponse:
     )
 
 
-def _handle_trigger_predictions(queue_client: QueueClient, req: func.HttpRequest) -> func.HttpResponse:
-    """Trigger predictions on-demand."""
-    try:
-        return _json_200({"status": "ok", "debug": "handler reached"})
-    except Exception as e:
-        logger.error("Debug handler error: %s", str(e), exc_info=True)
-        return _json_200({"status": "error", "error": str(e)})
-
-
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -223,10 +205,6 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
     if route == "usage":
         return _handle_usage(usage_container)
-
-    if route == "predictions/trigger" and req.method == "POST":
-        queue_client = get_queue_client()
-        return _handle_trigger_predictions(queue_client, req)
 
     # fixtures/<matchday>
     m = re.fullmatch(r"fixtures/(\d+)", route)
