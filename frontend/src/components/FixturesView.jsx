@@ -13,6 +13,7 @@ function FixtureRow({
   kickoff,
   predictedHomeScore,
   predictedAwayScore,
+  predictedConfidence,
 }) {
   const finished = status === 'FT'
   const live = ['1H', '2H', 'HT', 'ET', 'P'].includes(status)
@@ -33,7 +34,7 @@ function FixtureRow({
         ) : upcoming && hasPrediction ? (
           <div>
             <div className="predicted-score">
-              {predictedHomeScore} – {predictedAwayScore} <span className="pred-label">(pred)</span>
+              {predictedHomeScore} – {predictedAwayScore} <span className={`pred-label ${predictedConfidence || ''}`}>{predictedConfidence ? `(pred · ${predictedConfidence})` : '(pred)'}</span>
             </div>
             <div className="kickoff-time">{dateStr} {timeStr}</div>
           </div>

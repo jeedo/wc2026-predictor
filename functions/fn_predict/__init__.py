@@ -77,15 +77,16 @@ def _build_prompt(
 
     schema = (
         '{"predictions": ['
-        '{"group": "A", "winner": "...", "runnerUp": "...", "reasoning": "...", '
+        '{"group": "A", "winner": "...", "runnerUp": "...", "confidence": "high|medium|low", "reasoning": "...", '
         '"matches": [{"homeTeam": "...", "awayTeam": "...", "matchday": 1, '
-        '"predictedHomeScore": 0, "predictedAwayScore": 0}]}'
+        '"predictedHomeScore": 0, "predictedAwayScore": 0, "confidence": "high|medium|low"}]}'
         ']}'
     )
 
     lines = [
         "You are a football analyst. Predict the FIFA World Cup 2026 group stage outcomes.",
-        "For each group, predict: the winner, runner-up, and the score of every upcoming fixture.",
+        "For each group, predict: the winner, runner-up, confidence level (high/medium/low), reasoning, and the score of every upcoming fixture.",
+        "Rate your confidence for each group and each predicted match score.",
         "Respond ONLY with valid JSON matching this schema exactly:",
         schema,
         "",

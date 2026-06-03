@@ -8,7 +8,7 @@ import azure.functions as func
 from fn_api import main as api_main
 
 
-def _make_request(method: str = "GET", url: str = "http://localhost/api/groups", params: dict | None = None) -> func.HttpRequest:
+def _make_request(method: str = "GET", url: str = "http://localhost/api/groups", params: dict | None = None, body: bytes | None = None) -> func.HttpRequest:
     # Derive route param from URL so routing uses route_params["route"]
     path = url.split("?")[0]
     route = path.split("/api/", 1)[-1] if "/api/" in path else ""
@@ -18,7 +18,7 @@ def _make_request(method: str = "GET", url: str = "http://localhost/api/groups",
         headers={},
         params=params or {},
         route_params={"route": route},
-        body=b"",
+        body=body or b"",
     )
 
 
@@ -46,9 +46,10 @@ PREDICTION_DOC = {
             "group": "A",
             "winner": "Germany",
             "runnerUp": "Mexico",
+            "confidence": "high",
             "reasoning": "Strong",
             "matches": [
-                {"homeTeam": "Germany", "awayTeam": "Mexico", "matchday": 1, "predictedHomeScore": 2, "predictedAwayScore": 0},
+                {"homeTeam": "Germany", "awayTeam": "Mexico", "matchday": 1, "predictedHomeScore": 2, "predictedAwayScore": 0, "confidence": "high"},
             ],
         },
     ],
@@ -141,6 +142,7 @@ def test_get_fixtures_by_matchday():
     # Verify predictions were joined
     assert body["fixtures"][0]["predictedHomeScore"] == 2
     assert body["fixtures"][0]["predictedAwayScore"] == 0
+    assert body["fixtures"][0]["predictedConfidence"] == "high"
 
 
 def test_get_fixtures_without_predictions():
@@ -191,6 +193,69 @@ def test_unknown_route_returns_404():
         resp = api_main(req)
 
     assert resp.status_code == 404
+
+
+def test_trigger_predictions_enqueues_message():
+    req = _make_request(
+        method="POST",
+        url="http://localhost/api/predictions/trigger",
+        params={"route": "predictions/trigger"},
+        body=json.dumps({"matchday": 1}).encode("utf-8"),
+    )
+
+    mock_queue = MagicMock()
+    containers = _mock_containers()
+
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_queue_client", return_value=mock_queue):
+            resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["status"] == "queued"
+    assert body["matchday"] == 1
+    mock_queue.send_message.assert_called_once()
+
+
+def test_trigger_predictions_defaults_to_matchday_1():
+    req = _make_request(
+        method="POST",
+        url="http://localhost/api/predictions/trigger",
+        params={"route": "predictions/trigger"},
+        body=b"{}",
+    )
+
+    mock_queue = MagicMock()
+    containers = _mock_containers()
+
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_queue_client", return_value=mock_queue):
+            resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["matchday"] == 1
+
+
+def test_trigger_predictions_rejects_invalid_matchday():
+    req = _make_request(
+        method="POST",
+        url="http://localhost/api/predictions/trigger",
+        params={"route": "predictions/trigger"},
+        body=json.dumps({"matchday": -1}).encode("utf-8"),
+    )
+
+    mock_queue = MagicMock()
+    containers = _mock_containers()
+
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_queue_client", return_value=mock_queue):
+            resp = api_main(req)
+
+    assert resp.status_code == 400
+    body = _json_body(resp)
+    assert "error" in body
+    mock_queue.send_message.assert_not_called()
 
 
 def test_response_shape_accuracy():
