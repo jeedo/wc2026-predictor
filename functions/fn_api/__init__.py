@@ -10,8 +10,6 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from typing import Any
 
-import base64
-
 import azure.functions as func
 from azure.cosmos import CosmosClient  # sync client — fn_api is synchronous
 from azure.storage.queue import QueueClient
