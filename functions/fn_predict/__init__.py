@@ -13,6 +13,7 @@ from azure.cosmos.aio import CosmosClient
 
 from shared.cosmos import upsert_item, query_items
 from shared.serpa import search_team_news
+from shared.usage_tracker import record_call
 from fn_predict.scoring import compute_accuracy
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,15 @@ def get_containers() -> tuple[Any, Any, Any, Any]:
         db.get_container_client("predictions"),
         db.get_container_client("scores"),
     )
+
+
+def get_usage_container() -> Any | None:
+    conn_str = os.environ.get("CosmosDbConnectionString")
+    if not conn_str:
+        return None
+    cosmos = CosmosClient.from_connection_string(conn_str)
+    db = cosmos.get_database_client(os.environ.get("COSMOS_DATABASE_NAME", "wc2026"))
+    return db.get_container_client("usage")
 
 
 def get_anthropic_client() -> anthropic.AsyncAnthropic:
@@ -136,6 +146,7 @@ async def main(msg: func.QueueMessage) -> None:
     logger.info("Generating predictions for matchday %s", matchday)
 
     teams_container, fixtures_container, predictions_container, scores_container = get_containers()
+    usage_container = get_usage_container()
     claude = get_anthropic_client()
 
     teams = await query_items(teams_container, "SELECT * FROM c")
@@ -148,6 +159,7 @@ async def main(msg: func.QueueMessage) -> None:
             team_name = team.get("name", "")
             if team_name:
                 news[team_name] = await search_team_news(team_name, api_key=serpa_key)
+                await record_call(usage_container, "serper")
 
     prompt = _build_prompt(teams=teams, fixtures=fixtures, news=news or None)
 
@@ -155,6 +167,13 @@ async def main(msg: func.QueueMessage) -> None:
         model=_MODEL,
         max_tokens=_MAX_TOKENS,
         messages=[{"role": "user", "content": prompt}],
+    )
+
+    usage = response.usage
+    await record_call(
+        usage_container, "anthropic",
+        inputTokens=usage.input_tokens,
+        outputTokens=usage.output_tokens,
     )
 
     raw_text = response.content[0].text

@@ -64,7 +64,7 @@ SCORE_DOC = {
 }
 
 
-def _mock_containers(teams=None, fixtures=None, predictions=None, scores=None):
+def _mock_containers(teams=None, fixtures=None, predictions=None, scores=None, usage=None):
     mc_teams = MagicMock()
     mc_teams.query_items = MagicMock(return_value=iter(teams or []))
 
@@ -77,7 +77,10 @@ def _mock_containers(teams=None, fixtures=None, predictions=None, scores=None):
     mc_scores = MagicMock()
     mc_scores.query_items = MagicMock(return_value=iter(scores or []))
 
-    return mc_teams, mc_fixtures, mc_predictions, mc_scores
+    mc_usage = MagicMock()
+    mc_usage.query_items = MagicMock(return_value=iter(usage or []))
+
+    return mc_teams, mc_fixtures, mc_predictions, mc_scores, mc_usage
 
 
 def test_get_groups_returns_all_groups():
@@ -185,3 +188,74 @@ def test_response_shape_predictions():
 
     body = _json_body(resp)
     assert body["groups"][0]["reasoning"] == "Strong"
+
+
+# ---------------------------------------------------------------------------
+# GET /usage
+# ---------------------------------------------------------------------------
+
+from datetime import date as _date
+
+USAGE_DOCS = [
+    {
+        "id": f"usage-api-football-{_date.today().isoformat()}",
+        "provider": "api-football",
+        "date": _date.today().isoformat(),
+        "callCount": 8,
+    },
+    {
+        "id": f"usage-anthropic-{_date.today().isoformat()}",
+        "provider": "anthropic",
+        "date": _date.today().isoformat(),
+        "callCount": 2,
+        "inputTokens": 20000,
+        "outputTokens": 1500,
+    },
+    {
+        "id": f"usage-serper-{_date.today().isoformat()}",
+        "provider": "serper",
+        "date": _date.today().isoformat(),
+        "callCount": 96,
+    },
+]
+
+
+def test_get_usage_returns_providers():
+    req = _make_request(url="http://localhost/api/usage")
+    containers = _mock_containers(usage=USAGE_DOCS)
+
+    with patch("fn_api.get_containers", return_value=containers):
+        resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert "providers" in body
+    names = [p["name"] for p in body["providers"]]
+    assert "api-football" in names
+    assert "anthropic" in names
+
+
+def test_get_usage_includes_limit_and_percent():
+    req = _make_request(url="http://localhost/api/usage")
+    containers = _mock_containers(usage=USAGE_DOCS)
+
+    with patch("fn_api.get_containers", return_value=containers):
+        resp = api_main(req)
+
+    body = _json_body(resp)
+    af = next(p for p in body["providers"] if p["name"] == "api-football")
+    assert af["callCount"] == 8
+    assert af["limit"] == 100
+    assert af["percentUsed"] == pytest.approx(8.0)
+
+
+def test_get_usage_returns_empty_providers_when_no_data():
+    req = _make_request(url="http://localhost/api/usage")
+    containers = _mock_containers(usage=[])
+
+    with patch("fn_api.get_containers", return_value=containers):
+        resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["providers"] == []

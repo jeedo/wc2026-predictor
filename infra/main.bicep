@@ -119,6 +119,17 @@ resource scoresContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/con
   }
 }
 
+resource usageContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-02-15-preview' = {
+  parent: cosmosDatabase
+  name: 'usage'
+  properties: {
+    resource: {
+      id: 'usage'
+      partitionKey: { paths: ['/provider'], kind: 'Hash' }
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Key Vault
 // ---------------------------------------------------------------------------

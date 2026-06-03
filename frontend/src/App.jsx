@@ -2,12 +2,14 @@ import { useState } from 'react'
 import GroupsView from './components/GroupsView'
 import FixturesView from './components/FixturesView'
 import AccuracyView from './components/AccuracyView'
+import UsageView from './components/UsageView'
 import './App.css'
 
 const VIEWS = [
   { id: 'groups', label: 'Groups' },
   { id: 'fixtures', label: 'Fixtures' },
   { id: 'accuracy', label: 'Accuracy' },
+  { id: 'usage', label: 'API Usage' },
 ]
 
 export default function App() {
@@ -37,6 +39,7 @@ export default function App() {
         {view === 'groups' && <GroupsView />}
         {view === 'fixtures' && <FixturesView />}
         {view === 'accuracy' && <AccuracyView />}
+        {view === 'usage' && <UsageView />}
       </main>
 
       <footer className="app-footer">
