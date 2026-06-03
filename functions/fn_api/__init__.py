@@ -105,18 +105,21 @@ def _json_404(message: str) -> func.HttpResponse:
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
     teams_container, fixtures_container, predictions_container, scores_container = get_containers()
-    path = req.url.split("?")[0]
 
-    if path.endswith("/api/groups"):
+    # Use route_params (populated by the {*route} wildcard) for reliable routing
+    route = req.route_params.get("route", "").strip("/")
+
+    if route == "groups":
         return _handle_groups(teams_container)
 
-    if path.endswith("/api/predictions"):
+    if route == "predictions":
         return _handle_predictions(predictions_container)
 
-    if path.endswith("/api/accuracy"):
+    if route == "accuracy":
         return _handle_accuracy(scores_container)
 
-    m = _FIXTURE_ROUTE.search(path)
+    # fixtures/<matchday>
+    m = re.fullmatch(r"fixtures/(\d+)", route)
     if m:
         return _handle_fixtures(fixtures_container, int(m.group(1)))
 

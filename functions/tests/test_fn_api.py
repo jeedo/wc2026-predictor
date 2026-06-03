@@ -9,12 +9,15 @@ from fn_api import main as api_main
 
 
 def _make_request(method: str = "GET", url: str = "http://localhost/api/groups", params: dict | None = None) -> func.HttpRequest:
+    # Derive route param from URL so routing uses route_params["route"]
+    path = url.split("?")[0]
+    route = path.split("/api/", 1)[-1] if "/api/" in path else ""
     return func.HttpRequest(
         method=method,
         url=url,
         headers={},
         params=params or {},
-        route_params={},
+        route_params={"route": route},
         body=b"",
     )
 

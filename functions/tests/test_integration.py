@@ -220,7 +220,7 @@ def test_api_returns_prediction_written_by_predict():
 
     req = func.HttpRequest(
         method="GET", url="http://localhost/api/predictions",
-        headers={}, params={}, route_params={}, body=b"",
+        headers={}, params={}, route_params={"route": "predictions"}, body=b"",
     )
 
     with patch("fn_api.get_containers",
@@ -287,7 +287,7 @@ async def test_full_pipeline_end_to_end():
     # Call fn_api and verify response
     req = func.HttpRequest(
         method="GET", url="http://localhost/api/predictions",
-        headers={}, params={}, route_params={}, body=b"",
+        headers={}, params={}, route_params={"route": "predictions"}, body=b"",
     )
     with patch("fn_api.get_containers",
                return_value=(teams_db, fixtures_db, predictions_db, scores_db)):
