@@ -13,8 +13,8 @@ const PREDICTIONS = {
   matchday: 1,
   generatedAt: '2026-06-12T10:00:00Z',
   groups: [
-    { group: 'A', winner: 'Germany', runnerUp: 'Mexico', reasoning: 'Strong FIFA ranking.' },
-    { group: 'B', winner: 'Brazil', runnerUp: 'Argentina', reasoning: 'Brazil leads.' },
+    { group: 'A', winner: 'Germany', runnerUp: 'Mexico', confidence: 'high', reasoning: 'Strong FIFA ranking.' },
+    { group: 'B', winner: 'Brazil', runnerUp: 'Argentina', confidence: 'medium', reasoning: 'Brazil leads.' },
   ],
 }
 
@@ -26,10 +26,11 @@ const PREDICTIONS_WITH_MATCHES = {
       group: 'A',
       winner: 'Germany',
       runnerUp: 'Mexico',
+      confidence: 'high',
       reasoning: 'Strong FIFA ranking.',
       matches: [
-        { homeTeam: 'Germany', awayTeam: 'Mexico', matchday: 1, predictedHomeScore: 2, predictedAwayScore: 1 },
-        { homeTeam: 'Germany', awayTeam: 'Poland', matchday: 2, predictedHomeScore: 1, predictedAwayScore: 0 },
+        { homeTeam: 'Germany', awayTeam: 'Mexico', matchday: 1, predictedHomeScore: 2, predictedAwayScore: 1, confidence: 'high' },
+        { homeTeam: 'Germany', awayTeam: 'Poland', matchday: 2, predictedHomeScore: 1, predictedAwayScore: 0, confidence: 'medium' },
       ],
     },
   ],
@@ -59,6 +60,18 @@ test('shows predicted winner and runner-up when predictions exist', async () => 
     expect(screen.getByText('Germany')).toBeInTheDocument()
     expect(screen.getByText('Mexico')).toBeInTheDocument()
     expect(screen.getByText(/Strong FIFA ranking/)).toBeInTheDocument()
+  })
+})
+
+test('shows confidence badge next to winner', async () => {
+  vi.stubGlobal('fetch', vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(GROUPS_DATA) })
+    .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(PREDICTIONS) }))
+  render(<GroupsView />)
+  await waitFor(() => {
+    // Confidence badges should appear in uppercase
+    const badges = screen.getAllByText(/high|medium|low/i)
+    expect(badges.length).toBeGreaterThan(0)
   })
 })
 

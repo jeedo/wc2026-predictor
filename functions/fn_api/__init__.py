@@ -10,8 +10,11 @@ from collections import defaultdict
 from datetime import date, datetime, timezone
 from typing import Any
 
+import base64
+
 import azure.functions as func
 from azure.cosmos import CosmosClient  # sync client — fn_api is synchronous
+from azure.storage.queue import QueueClient
 
 from shared.cosmos import query_items_sync as query_items
 from shared.usage_tracker import PROVIDER_LIMITS
@@ -37,6 +40,13 @@ def get_containers() -> tuple[Any, Any, Any, Any, Any]:
         db.get_container_client("predictions"),
         db.get_container_client("scores"),
         db.get_container_client("usage"),
+    )
+
+
+def get_queue_client() -> QueueClient:
+    return QueueClient.from_connection_string(
+        os.environ["AzureWebJobsStorage"],
+        queue_name=os.environ.get("PREDICT_QUEUE_NAME", "predict-trigger"),
     )
 
 
@@ -81,7 +91,7 @@ def _handle_fixtures(
         )
         if prediction_docs:
             pred_doc = prediction_docs[0]
-            # Build lookup: (homeTeam, awayTeam) → {predictedHomeScore, predictedAwayScore}
+            # Build lookup: (homeTeam, awayTeam) → {predictedHomeScore, predictedAwayScore, predictedConfidence, predictedReasoning}
             pred_lookup: dict[tuple[str, str], dict[str, Any]] = {}
             for group in pred_doc.get("groups", []):
                 for match in group.get("matches", []):
@@ -90,6 +100,8 @@ def _handle_fixtures(
                         pred_lookup[key] = {
                             "predictedHomeScore": match.get("predictedHomeScore"),
                             "predictedAwayScore": match.get("predictedAwayScore"),
+                            "predictedConfidence": match.get("confidence"),
+                            "predictedReasoning": match.get("reasoning"),
                         }
 
             # Merge predictions onto fixtures (deep copy to avoid mutating originals)
@@ -100,6 +112,9 @@ def _handle_fixtures(
                 if key in pred_lookup:
                     doc_copy["predictedHomeScore"] = pred_lookup[key]["predictedHomeScore"]
                     doc_copy["predictedAwayScore"] = pred_lookup[key]["predictedAwayScore"]
+                    doc_copy["predictedConfidence"] = pred_lookup[key]["predictedConfidence"]
+                    if pred_lookup[key]["predictedReasoning"]:
+                        doc_copy["predictedReasoning"] = pred_lookup[key]["predictedReasoning"]
                 docs_with_preds.append(doc_copy)
             docs = docs_with_preds
     except Exception as e:
@@ -163,6 +178,32 @@ def _handle_accuracy(scores_container: Any) -> func.HttpResponse:
     return _json_200(docs[0])
 
 
+def _handle_trigger_predictions(queue_client: QueueClient, req: func.HttpRequest) -> func.HttpResponse:
+    try:
+        body = req.get_json()
+    except ValueError:
+        body = {}
+    matchday = body.get("matchday", 1)
+    if not isinstance(matchday, int) or matchday < 1:
+        return func.HttpResponse(
+            json.dumps({"error": "matchday must be a positive integer"}),
+            status_code=400,
+            mimetype="application/json",
+        )
+    message = json.dumps({"matchday": matchday, "fixtureId": None})
+    try:
+        queue_client.send_message(message)
+        logger.info("Enqueued predict trigger for matchday %s", matchday)
+        return _json_200({"status": "queued", "matchday": matchday})
+    except Exception as e:
+        logger.error("Failed to enqueue predict trigger: %s", str(e), exc_info=True)
+        return func.HttpResponse(
+            json.dumps({"error": "Failed to queue prediction request"}),
+            status_code=500,
+            mimetype="application/json",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -205,6 +246,10 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
     if route == "usage":
         return _handle_usage(usage_container)
+
+    if route == "predictions/trigger" and req.method == "POST":
+        queue_client = get_queue_client()
+        return _handle_trigger_predictions(queue_client, req)
 
     # fixtures/<matchday>
     m = re.fullmatch(r"fixtures/(\d+)", route)

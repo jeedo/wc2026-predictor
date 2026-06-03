@@ -10,6 +10,7 @@
   --accent-hover: #2ea043;
   --danger: #da3633;
   --warning: #e3b341;
+  --success: #238636;
   --radius: 8px;
   --font: system-ui, -apple-system, sans-serif;
 }
@@ -86,6 +87,13 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
 .winner .badge { background: var(--accent); color: #fff; }
 .runner-up .badge { background: var(--border); color: var(--text-muted); }
 .team-name { font-weight: 600; }
+.confidence-badge {
+  font-size: 0.6rem; font-weight: 700; padding: 0.1rem 0.3rem;
+  border-radius: 3px; text-transform: uppercase; margin-left: 0.25rem;
+}
+.confidence-badge.high { color: var(--success); }
+.confidence-badge.medium { color: var(--warning); }
+.confidence-badge.low { color: var(--danger); }
 .reasoning { font-size: 0.8rem; color: var(--text-muted); font-style: italic; line-height: 1.4; }
 .team-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.3rem; }
 .team-list li { font-size: 0.9rem; color: var(--text); padding: 0.2rem 0; border-bottom: 1px solid var(--border); }
@@ -117,6 +125,9 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
 .fixture-row .kickoff { font-size: 0.8rem; color: var(--text-muted); }
 .fixture-row .predicted-score { display: flex; align-items: center; gap: 0.25rem; opacity: 0.7; }
 .fixture-row .pred-label { font-size: 0.65rem; font-weight: 600; color: var(--text-muted); }
+.fixture-row .pred-label.high { color: var(--success); }
+.fixture-row .pred-label.medium { color: var(--warning); }
+.fixture-row .pred-label.low { color: var(--danger); }
 .fixture-row .kickoff-time { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem; }
 .status-badge { font-size: 0.75rem; color: var(--text-muted); min-width: 48px; text-align: right; }
 .status-badge.live { color: var(--danger); font-weight: 700; }

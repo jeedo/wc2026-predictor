@@ -37,6 +37,11 @@ function GroupCard({ group, teams = [], prediction }) {
           <div className="prediction-row winner">
             <span className="badge">1st</span>
             <span className="team-name">{prediction.winner}</span>
+            {prediction.confidence && (
+              <span className={`confidence-badge ${prediction.confidence}`}>
+                {prediction.confidence}
+              </span>
+            )}
           </div>
           <div className="prediction-row runner-up">
             <span className="badge">2nd</span>

@@ -10,7 +10,7 @@ const MD1 = {
       homeScore: 2, awayScore: 0, status: 'FT', kickoff: '2026-06-12T15:00:00Z' },
     { id: 'fixture-102', matchday: 1, homeTeam: 'Brazil', awayTeam: 'Argentina',
       homeScore: null, awayScore: null, status: 'NS', kickoff: '2026-06-12T18:00:00Z',
-      predictedHomeScore: 2, predictedAwayScore: 1 },
+      predictedHomeScore: 2, predictedAwayScore: 1, predictedConfidence: 'medium' },
     { id: 'fixture-103', matchday: 1, homeTeam: 'France', awayTeam: 'Spain',
       homeScore: null, awayScore: null, status: 'NS', kickoff: '2026-06-13T15:00:00Z' },
   ],
@@ -96,7 +96,15 @@ test('shows predicted score for upcoming matches with predictions', async () => 
   await waitFor(() => {
     // Brazil vs Argentina has predictedHomeScore: 2, predictedAwayScore: 1
     expect(screen.getByText('2 – 1')).toBeInTheDocument()
-    expect(screen.getByText('(pred)')).toBeInTheDocument()
+    expect(screen.getByText('(pred · medium)')).toBeInTheDocument()
+  })
+})
+
+test('shows confidence level in predicted score', async () => {
+  render(<FixturesView />)
+  await waitFor(() => {
+    // Brazil vs Argentina has predictedConfidence: 'medium'
+    expect(screen.getByText('(pred · medium)')).toBeInTheDocument()
   })
 })
 
@@ -106,8 +114,8 @@ test('shows kickoff time alongside predicted score', async () => {
     // Should show both predicted score and kickoff time for Brazil vs Argentina
     expect(screen.getByText('Brazil')).toBeInTheDocument()
     expect(screen.getByText('Argentina')).toBeInTheDocument()
-    // Predicted score is shown
-    expect(screen.getByText('(pred)')).toBeInTheDocument()
+    // Predicted score is shown with confidence
+    expect(screen.getByText('(pred · medium)')).toBeInTheDocument()
   })
 })
 
