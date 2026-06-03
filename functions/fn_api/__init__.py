@@ -1,6 +1,7 @@
 """fn_api — HTTP Trigger: serve groups, predictions, fixtures, and accuracy."""
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
@@ -62,12 +63,48 @@ def _handle_predictions(predictions_container: Any) -> func.HttpResponse:
     return _json_200(docs[0])
 
 
-def _handle_fixtures(fixtures_container: Any, matchday: int) -> func.HttpResponse:
+def _handle_fixtures(
+    fixtures_container: Any, predictions_container: Any, matchday: int
+) -> func.HttpResponse:
     docs = query_items(
         fixtures_container,
         "SELECT * FROM c WHERE c.matchday = @md",
         parameters=[{"name": "@md", "value": matchday}],
     )
+
+    # Join predictions if available
+    try:
+        prediction_docs = query_items(
+            predictions_container,
+            "SELECT * FROM c WHERE c.id = @id",
+            parameters=[{"name": "@id", "value": f"prediction-md{matchday}"}],
+        )
+        if prediction_docs:
+            pred_doc = prediction_docs[0]
+            # Build lookup: (homeTeam, awayTeam) → {predictedHomeScore, predictedAwayScore}
+            pred_lookup: dict[tuple[str, str], dict[str, Any]] = {}
+            for group in pred_doc.get("groups", []):
+                for match in group.get("matches", []):
+                    if match.get("matchday") == matchday:
+                        key = (match.get("homeTeam", ""), match.get("awayTeam", ""))
+                        pred_lookup[key] = {
+                            "predictedHomeScore": match.get("predictedHomeScore"),
+                            "predictedAwayScore": match.get("predictedAwayScore"),
+                        }
+
+            # Merge predictions onto fixtures (deep copy to avoid mutating originals)
+            docs_with_preds = []
+            for doc in docs:
+                doc_copy = copy.deepcopy(doc)
+                key = (doc_copy.get("homeTeam", ""), doc_copy.get("awayTeam", ""))
+                if key in pred_lookup:
+                    doc_copy["predictedHomeScore"] = pred_lookup[key]["predictedHomeScore"]
+                    doc_copy["predictedAwayScore"] = pred_lookup[key]["predictedAwayScore"]
+                docs_with_preds.append(doc_copy)
+            docs = docs_with_preds
+    except Exception as e:
+        logger.warning("Failed to join predictions for matchday %s: %s", matchday, e)
+
     return _json_200({"matchday": matchday, "fixtures": docs})
 
 
@@ -172,6 +209,6 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     # fixtures/<matchday>
     m = re.fullmatch(r"fixtures/(\d+)", route)
     if m:
-        return _handle_fixtures(fixtures_container, int(m.group(1)))
+        return _handle_fixtures(fixtures_container, predictions_container, int(m.group(1)))
 
     return _json_404("Route not found")

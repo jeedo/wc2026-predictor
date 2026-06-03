@@ -115,6 +115,9 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
 .fixture-row .team.away { text-align: left; }
 .fixture-row .score { text-align: center; font-size: 1.1rem; font-weight: 700; min-width: 60px; }
 .fixture-row .kickoff { font-size: 0.8rem; color: var(--text-muted); }
+.fixture-row .predicted-score { display: flex; align-items: center; gap: 0.25rem; opacity: 0.7; }
+.fixture-row .pred-label { font-size: 0.65rem; font-weight: 600; color: var(--text-muted); }
+.fixture-row .kickoff-time { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem; }
 .status-badge { font-size: 0.75rem; color: var(--text-muted); min-width: 48px; text-align: right; }
 .status-badge.live { color: var(--danger); font-weight: 700; }
 .fixture-row.ft { border-left: 3px solid var(--accent); }

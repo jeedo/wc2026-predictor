@@ -42,7 +42,15 @@ PREDICTION_DOC = {
     "matchday": 1,
     "generatedAt": "2026-06-12T10:00:00Z",
     "groups": [
-        {"group": "A", "winner": "Germany", "runnerUp": "Mexico", "reasoning": "Strong"},
+        {
+            "group": "A",
+            "winner": "Germany",
+            "runnerUp": "Mexico",
+            "reasoning": "Strong",
+            "matches": [
+                {"homeTeam": "Germany", "awayTeam": "Mexico", "matchday": 1, "predictedHomeScore": 2, "predictedAwayScore": 0},
+            ],
+        },
     ],
 }
 
@@ -121,7 +129,7 @@ def test_get_predictions_empty_returns_404():
 
 def test_get_fixtures_by_matchday():
     req = _make_request(url="http://localhost/api/fixtures/1")
-    containers = _mock_containers(fixtures=FIXTURE_DOCS)
+    containers = _mock_containers(fixtures=FIXTURE_DOCS, predictions=[PREDICTION_DOC])
 
     with patch("fn_api.get_containers", return_value=containers):
         resp = api_main(req)
@@ -130,6 +138,26 @@ def test_get_fixtures_by_matchday():
     body = _json_body(resp)
     assert "fixtures" in body
     assert body["fixtures"][0]["homeTeam"] == "Germany"
+    # Verify predictions were joined
+    assert body["fixtures"][0]["predictedHomeScore"] == 2
+    assert body["fixtures"][0]["predictedAwayScore"] == 0
+
+
+def test_get_fixtures_without_predictions():
+    """Fixtures without predictions should still be returned."""
+    req = _make_request(url="http://localhost/api/fixtures/1")
+    containers = _mock_containers(fixtures=FIXTURE_DOCS, predictions=[])
+
+    with patch("fn_api.get_containers", return_value=containers):
+        resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert "fixtures" in body
+    assert body["fixtures"][0]["homeTeam"] == "Germany"
+    # Predicted scores should not be present
+    assert "predictedHomeScore" not in body["fixtures"][0]
+    assert "predictedAwayScore" not in body["fixtures"][0]
 
 
 def test_get_accuracy_returns_score():
