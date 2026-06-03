@@ -6,12 +6,14 @@ import logging
 import os
 import re
 from collections import defaultdict
+from datetime import date, datetime, timezone
 from typing import Any
 
 import azure.functions as func
 from azure.cosmos import CosmosClient  # sync client — fn_api is synchronous
 
 from shared.cosmos import query_items_sync as query_items
+from shared.usage_tracker import PROVIDER_LIMITS
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ _FIXTURE_ROUTE = re.compile(r"/api/fixtures/(\d+)$")
 # Azure client factory (patched in tests)
 # ---------------------------------------------------------------------------
 
-def get_containers() -> tuple[Any, Any, Any, Any]:
+def get_containers() -> tuple[Any, Any, Any, Any, Any]:
     cosmos = CosmosClient.from_connection_string(
         os.environ["CosmosDbConnectionString"],
         connection_verify=True,
@@ -33,6 +35,7 @@ def get_containers() -> tuple[Any, Any, Any, Any]:
         db.get_container_client("fixtures"),
         db.get_container_client("predictions"),
         db.get_container_client("scores"),
+        db.get_container_client("usage"),
     )
 
 
@@ -66,6 +69,51 @@ def _handle_fixtures(fixtures_container: Any, matchday: int) -> func.HttpRespons
         parameters=[{"name": "@md", "value": matchday}],
     )
     return _json_200({"matchday": matchday, "fixtures": docs})
+
+
+def _handle_usage(usage_container: Any) -> func.HttpResponse:
+    today = date.today().isoformat()
+    this_month = today[:7]
+
+    docs = query_items(usage_container, "SELECT * FROM c")
+
+    by_provider: dict[str, dict[str, Any]] = {}
+    for doc in docs:
+        provider = doc.get("provider", "unknown")
+        cfg = PROVIDER_LIMITS.get(provider, {})
+        window = cfg.get("window", "day")
+        doc_date: str = doc.get("date", "")
+
+        is_current = (
+            (window == "day" and doc_date == today) or
+            (window == "month" and doc_date.startswith(this_month))
+        )
+        if not is_current:
+            continue
+
+        if provider not in by_provider:
+            by_provider[provider] = {
+                "name": provider,
+                "callCount": 0,
+                "limit": cfg.get("limit"),
+                "window": window,
+            }
+
+        entry = by_provider[provider]
+        entry["callCount"] = entry.get("callCount", 0) + doc.get("callCount", 0)
+        for extra_key in ("inputTokens", "outputTokens"):
+            if extra_key in doc:
+                entry[extra_key] = entry.get(extra_key, 0) + doc[extra_key]
+
+    # Compute percentUsed for providers with a limit
+    for entry in by_provider.values():
+        if entry.get("limit"):
+            entry["percentUsed"] = round(entry["callCount"] / entry["limit"] * 100, 2)
+
+    return _json_200({
+        "asOf": datetime.now(timezone.utc).isoformat(),
+        "providers": list(by_provider.values()),
+    })
 
 
 def _handle_accuracy(scores_container: Any) -> func.HttpResponse:
@@ -104,7 +152,7 @@ def _json_404(message: str) -> func.HttpResponse:
 # ---------------------------------------------------------------------------
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
-    teams_container, fixtures_container, predictions_container, scores_container = get_containers()
+    teams_container, fixtures_container, predictions_container, scores_container, usage_container = get_containers()
 
     # Use route_params (populated by the {*route} wildcard) for reliable routing
     route = req.route_params.get("route", "").strip("/")
@@ -117,6 +165,9 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
     if route == "accuracy":
         return _handle_accuracy(scores_container)
+
+    if route == "usage":
+        return _handle_usage(usage_container)
 
     # fixtures/<matchday>
     m = re.fullmatch(r"fixtures/(\d+)", route)

@@ -246,7 +246,7 @@ def test_api_returns_prediction_written_by_predict():
 
     with patch("fn_api.get_containers",
                return_value=(InMemContainer(), InMemContainer(),
-                             predictions_db, InMemContainer())):
+                             predictions_db, InMemContainer(), InMemContainer())):
         from fn_api import main as api_main
         resp = api_main(req)
 
@@ -312,7 +312,7 @@ async def test_full_pipeline_end_to_end():
         headers={}, params={}, route_params={"route": "predictions"}, body=b"",
     )
     with patch("fn_api.get_containers",
-               return_value=(teams_db, fixtures_db, predictions_db, scores_db)):
+               return_value=(teams_db, fixtures_db, predictions_db, scores_db, InMemContainer())):
         from fn_api import main as api_main
         resp = api_main(req)
 

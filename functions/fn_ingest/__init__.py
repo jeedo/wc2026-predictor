@@ -15,6 +15,7 @@ from azure.keyvault.secrets import SecretClient
 
 from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd
 from shared.cosmos import upsert_item, query_items, read_item
+from shared.usage_tracker import record_call
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,15 @@ def get_containers() -> tuple[Any, Any]:
     return db.get_container_client("teams"), db.get_container_client("fixtures")
 
 
+def get_usage_container() -> Any | None:
+    conn_str = os.environ.get("CosmosDbConnectionString")
+    if not conn_str:
+        return None
+    cosmos = CosmosClient.from_connection_string(conn_str)
+    db = cosmos.get_database_client(os.environ.get("COSMOS_DATABASE_NAME", "wc2026"))
+    return db.get_container_client("usage")
+
+
 def get_queue_client() -> QueueClient:
     return QueueClient.from_connection_string(
         os.environ["AzureWebJobsStorage"],
@@ -133,11 +143,14 @@ async def main(mytimer: func.TimerRequest) -> None:
         logger.error("Fatal error in fn_ingest: %s", str(e), exc_info=True)
         raise
 
+    usage_container = get_usage_container()
+
     async with httpx.AsyncClient() as http:
         # Seed teams on first run (container empty)
         existing = await query_items(teams_container, "SELECT VALUE COUNT(1) FROM c")
         if not existing or existing[0] == 0:
             raw_teams = await fetch_teams_fd(api, http)
+            await record_call(usage_container, "api-football")
             for raw in raw_teams:
                 await upsert_item(teams_container, _build_team_doc(raw))
             logger.info("Seeded %d teams", len(raw_teams))
@@ -145,6 +158,7 @@ async def main(mytimer: func.TimerRequest) -> None:
         # Fetch and upsert fixtures for all three matchdays
         for matchday in _MATCHDAYS:
             raw_fixtures = await fetch_matches_fd(api, http, matchday)
+            await record_call(usage_container, "api-football")
             for raw in raw_fixtures:
                 doc = _build_fixture_doc(raw)
                 fixture_id = doc["id"]
