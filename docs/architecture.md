@@ -69,21 +69,24 @@ Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
 #### fn-predict — Queue Trigger (`predict-trigger` queue)
 
 - Retrieves `ANTHROPIC_API_KEY` and Cosmos DB connection string from Key Vault via managed identity
-- Fires when fn-ingest enqueues a message indicating one or more matches have finished
+- Fires in two scenarios:
+  1. When fn-ingest enqueues a message indicating one or more matches have finished (auto-regenerate predictions)
+  2. When the `POST /api/predictions/trigger` HTTP endpoint is called (on-demand, before tournament starts)
 - Reads current `fixtures` and `teams` data from Cosmos DB
 - Constructs a structured prompt with group standings, team form, and FIFA rankings
 - If `SERPA_API_KEY` is set, fetches recent news for each team via Serper.dev before calling Claude, enriching the prompt with up-to-date information
-- Calls Claude API (`claude-haiku-4-5`) requesting JSON output: group winner, runner-up, reasoning per group
+- Calls Claude API (`claude-haiku-4-5`) requesting JSON output: group winner, runner-up, confidence level, reasoning per group, and per-match predictions with confidence
 - Writes prediction documents to the `predictions` container, versioned by matchday
 - Idempotent: if multiple messages arrive for the same matchday (e.g. two matches finish in the same 6h window), the latest run overwrites the previous prediction document
 
 #### fn-api — HTTP Trigger
 
-- Exposes a lightweight REST API consumed by the React frontend
+- Exposes a lightweight REST API consumed by the React frontend and operators
 - `GET /groups` — returns all 12 groups with current standings
-- `GET /predictions` — returns latest Claude predictions with reasoning
-- `GET /fixtures/{matchday}` — returns scheduled and completed matches for a given matchday
+- `GET /predictions` — returns latest Claude predictions with per-group reasoning and confidence levels
+- `GET /fixtures/{matchday}` — returns scheduled and completed matches for a given matchday with predicted scores and confidence
 - `GET /accuracy` — returns prediction accuracy stats after each matchday; a group counts as correct only if **both** predicted winner and runner-up match the actual final standings (strict scoring, max 12 points)
+- `POST /api/predictions/trigger` — enqueue a prediction generation job (optional JSON body: `{"matchday": 1}`); allows pre-tournament predictions before any matches finish
 
 ### 3.3 Cosmos DB Schema
 
@@ -178,7 +181,7 @@ The API's `round` field returns strings (`"Group Stage - 1"`, `"Group Stage - 2"
 
 ### Claude API Request Shape
 
-`fn-predict` sends a single request per daily run containing all 12 groups. Claude responds with a JSON array:
+`fn-predict` sends a single request per prediction job (on-demand or post-match) containing all 12 groups. Claude responds with a JSON array including confidence ratings and per-match predictions:
 
 ```json
 {
@@ -187,7 +190,18 @@ The API's `round` field returns strings (`"Group Stage - 1"`, `"Group Stage - 2"
       "group": "A",
       "winner": "Germany",
       "runnerUp": "Mexico",
-      "reasoning": "Germany leads on FIFA ranking and form..."
+      "confidence": "high",
+      "reasoning": "Germany leads on FIFA ranking and form...",
+      "matches": [
+        {
+          "homeTeam": "Germany",
+          "awayTeam": "Mexico",
+          "matchday": 1,
+          "predictedHomeScore": 2,
+          "predictedAwayScore": 0,
+          "confidence": "high"
+        }
+      ]
     }
   ]
 }
@@ -223,7 +237,23 @@ A group is scored as correct only when **both** predicted winner and runner-up m
   "matchday": 2,
   "generatedAt": "2026-06-20T08:00:00Z",
   "groups": [
-    { "group": "A", "winner": "Germany", "runnerUp": "Mexico", "reasoning": "..." }
+    {
+      "group": "A",
+      "winner": "Germany",
+      "runnerUp": "Mexico",
+      "confidence": "high",
+      "reasoning": "...",
+      "matches": [
+        {
+          "homeTeam": "Germany",
+          "awayTeam": "Mexico",
+          "matchday": 1,
+          "predictedHomeScore": 2,
+          "predictedAwayScore": 0,
+          "confidence": "high"
+        }
+      ]
+    }
   ]
 }
 ```
@@ -249,8 +279,21 @@ A group is scored as correct only when **both** predicted winner and runner-up m
 | Function     | Schedule                             | Purpose                                                         |
 |--------------|--------------------------------------|-----------------------------------------------------------------|
 | `fn-ingest`  | Every 6 hours, June 12 – July 2      | Fetch latest match results and standings from football-data.org |
-| `fn-predict` | On match finish (Queue trigger)       | Regenerate predictions whenever fn-ingest detects a FINISHED match |
+| `fn-predict` | On match finish OR on-demand HTTP    | Regenerate predictions when fn-ingest detects a FINISHED match, or when `POST /api/predictions/trigger` is called (pre-tournament) |
 | `fn-api`     | On-demand HTTP                       | Serve frontend requests; no schedule                            |
+
+-----
+
+## Pre-Tournament Prediction Workflow
+
+To satisfy the success criterion of predictions ready before Matchday 1 (June 12):
+
+1. **Before June 11**: Call `POST /api/predictions/trigger` with `{"matchday": 1}` to enqueue a prediction generation job. This does NOT require any matches to be finished.
+2. **Within 30s**: fn-predict processes the queue message, reads current teams and fixtures from Cosmos DB, calls Claude API with instructions to predict group winners and match scores, and writes the results to the predictions container.
+3. **Immediately available**: Frontend displays predictions on the Groups and Fixtures views with confidence badges and reasoning.
+4. **After each matchday**: fn-ingest detects finished matches and automatically re-enqueues fn-predict to regenerate predictions with actual results incorporated.
+
+The `POST /api/predictions/trigger` endpoint allows predictions to be generated on-demand at any point in the tournament without waiting for matches to finish. Calling it multiple times for the same matchday overwrites the previous prediction (idempotent).
 
 -----
 
