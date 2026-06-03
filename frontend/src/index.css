@@ -87,6 +87,9 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
 .runner-up .badge { background: var(--border); color: var(--text-muted); }
 .team-name { font-weight: 600; }
 .reasoning { font-size: 0.8rem; color: var(--text-muted); font-style: italic; line-height: 1.4; }
+.team-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.team-list li { font-size: 0.9rem; color: var(--text); padding: 0.2rem 0; border-bottom: 1px solid var(--border); }
+.team-list li:last-child { border-bottom: none; }
 
 /* ---- Fixtures View ---- */
 .matchday-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
