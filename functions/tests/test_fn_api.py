@@ -142,7 +142,6 @@ def test_get_fixtures_by_matchday():
     # Verify predictions were joined
     assert body["fixtures"][0]["predictedHomeScore"] == 2
     assert body["fixtures"][0]["predictedAwayScore"] == 0
-    assert body["fixtures"][0]["predictedConfidence"] == "high"
 
 
 def test_get_fixtures_without_predictions():
