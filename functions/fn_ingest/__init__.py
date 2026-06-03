@@ -124,8 +124,29 @@ def get_queue_client() -> QueueClient:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-async def main(mytimer: func.TimerRequest) -> None:
-    if mytimer.past_due:
+async def main(mytimer: func.TimerRequest | None = None, req: func.HttpRequest | None = None) -> func.HttpResponse | None:
+    # Handle HTTP trigger (on-demand prediction trigger)
+    if req is not None:
+        try:
+            body = req.get_json()
+            matchday = body.get("matchday", 1)
+            if not isinstance(matchday, int) or matchday < 1:
+                return func.HttpResponse(
+                    json.dumps({"error": "matchday must be a positive integer"}),
+                    status_code=400,
+                    mimetype="application/json",
+                )
+            logger.info("On-demand ingest trigger for matchday %s", matchday)
+            # Continue with normal ingest logic below
+        except ValueError:
+            return func.HttpResponse(
+                json.dumps({"error": "Invalid JSON"}),
+                status_code=400,
+                mimetype="application/json",
+            )
+
+    # Handle timer trigger
+    if mytimer is not None and mytimer.past_due:
         logger.warning("Timer trigger is past due")
 
     try:
@@ -185,3 +206,11 @@ async def main(mytimer: func.TimerRequest) -> None:
                         doc["fixtureId"],
                         matchday,
                     )
+
+    # Return response for HTTP trigger
+    if req is not None:
+        return func.HttpResponse(
+            json.dumps({"status": "ok", "message": "Ingestion triggered"}),
+            status_code=200,
+            mimetype="application/json",
+        )
