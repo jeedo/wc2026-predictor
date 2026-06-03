@@ -32,6 +32,7 @@ The FIFA World Cup 2026 group stage features 48 teams across 12 groups (A–L), 
 | Database     | Azure Cosmos DB — NoSQL API              | Permanent free tier: 1,000 RU/s + 25GB; schema-free JSON fits team/fixture data |
 | AI / LLM     | Anthropic Claude API (claude-haiku-4-5)  | ~$0.14 for full group stage; sufficient for structured JSON prediction tasks    |
 | Data Source  | API-Football v3 (api-sports.io)          | Free tier: 100 req/day; covers WC 2026 fixtures, live scores, group standings   |
+| News Search  | Serper.dev (Google Search API)           | Free tier: 2,500 searches/month; provides up-to-date team news for Claude prompt |
 | Secrets      | Azure Key Vault                          | Managed identity access; no credentials in app settings or source control       |
 | CI/CD        | Azure DevOps Pipelines                   | YAML pipelines; Bicep infra + function deploy stages                            |
 | IaC          | Azure Bicep                              | Declarative provisioning of Cosmos DB, Function App, Static Web App, Key Vault  |
@@ -71,6 +72,7 @@ Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
 - Fires when fn-ingest enqueues a message indicating one or more matches have finished
 - Reads current `fixtures` and `teams` data from Cosmos DB
 - Constructs a structured prompt with group standings, team form, and FIFA rankings
+- If `SERPA_API_KEY` is set, fetches recent news for each team via Serper.dev before calling Claude, enriching the prompt with up-to-date information
 - Calls Claude API (`claude-haiku-4-5`) requesting JSON output: group winner, runner-up, reasoning per group
 - Writes prediction documents to the `predictions` container, versioned by matchday
 - Idempotent: if multiple messages arrive for the same matchday (e.g. two matches finish in the same 6h window), the latest run overwrites the previous prediction document
@@ -141,6 +143,7 @@ All runtime secrets are stored in Azure Key Vault and accessed via the Function 
 | `apisports-api-key`      | API-Football (api-sports.io) API key    |
 | `anthropic-api-key`      | Anthropic Claude API key                |
 | `cosmos-connection-string` | Cosmos DB primary connection string   |
+| `serpa-api-key`          | Serper.dev API key for team news search |
 
 The `infra` Bicep stage provisions the Key Vault, creates secrets, grants the Function App's managed identity `Key Vault Secrets User` role, and outputs the vault URI into a pipeline variable consumed by the `functions` stage.
 

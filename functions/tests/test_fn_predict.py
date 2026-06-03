@@ -1,5 +1,6 @@
 """Tests for fn_predict — queue trigger function."""
 import json
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -87,6 +88,27 @@ def test_build_prompt_includes_fixture_teams():
     teams = [_make_team("A", "Germany"), _make_team("A", "Mexico"), _make_team("A", "Poland")]
     prompt = _build_prompt(teams=teams, fixtures=fixtures)
     assert "Poland" in prompt
+
+
+def test_build_prompt_includes_team_news():
+    teams = [_make_team("A", "Germany"), _make_team("A", "Mexico")]
+    news = {"Germany": ["Germany win warm-up 2-0", "Musiala fit after injury"]}
+    prompt = _build_prompt(teams=teams, fixtures=[], news=news)
+    assert "Germany win warm-up 2-0" in prompt
+    assert "Musiala fit after injury" in prompt
+
+
+def test_build_prompt_without_news_still_works():
+    teams = [_make_team("A", "Germany")]
+    prompt = _build_prompt(teams=teams, fixtures=[])
+    assert "Germany" in prompt
+
+
+def test_build_prompt_news_section_label():
+    teams = [_make_team("A", "Germany")]
+    news = {"Germany": ["Some headline"]}
+    prompt = _build_prompt(teams=teams, fixtures=[], news=news)
+    assert "NEWS" in prompt.upper() or "news" in prompt.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +206,68 @@ async def test_predict_writes_prediction_doc(queue_msg):
     doc = mock_predictions_container.upsert_item.call_args[1]["body"]
     assert doc["matchday"] == 1
     assert len(doc["groups"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_predict_fetches_news_when_serpa_key_set(queue_msg):
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(
+        return_value=_async_iter([_make_team("A", "Germany")])
+    )
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.query_items = MagicMock(return_value=_async_iter([]))
+    mock_predictions_container = MagicMock()
+    mock_predictions_container.upsert_item = AsyncMock()
+
+    mock_claude = MagicMock()
+    mock_msg = MagicMock()
+    mock_msg.content = [MagicMock(text=CLAUDE_PREDICTIONS)]
+    mock_claude.messages.create = AsyncMock(return_value=mock_msg)
+
+    with (
+        patch("fn_predict.get_containers", return_value=(
+            mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
+        )),
+        patch("fn_predict.get_anthropic_client", return_value=mock_claude),
+        patch("fn_predict.search_team_news", new=AsyncMock(return_value=["Germany news headline"])) as mock_search,
+        patch.dict(os.environ, {"SERPA_API_KEY": "test-serpa-key"}),
+    ):
+        await predict_main(queue_msg)
+
+    mock_search.assert_called()
+    # Prompt sent to Claude should include the news headline
+    prompt_sent = mock_claude.messages.create.call_args[1]["messages"][0]["content"]
+    assert "Germany news headline" in prompt_sent
+
+
+@pytest.mark.asyncio
+async def test_predict_skips_news_when_no_serpa_key(queue_msg):
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(
+        return_value=_async_iter([_make_team("A", "Germany")])
+    )
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.query_items = MagicMock(return_value=_async_iter([]))
+    mock_predictions_container = MagicMock()
+    mock_predictions_container.upsert_item = AsyncMock()
+
+    mock_claude = MagicMock()
+    mock_msg = MagicMock()
+    mock_msg.content = [MagicMock(text=CLAUDE_PREDICTIONS)]
+    mock_claude.messages.create = AsyncMock(return_value=mock_msg)
+
+    env_without_serpa = {k: v for k, v in os.environ.items() if k != "SERPA_API_KEY"}
+    with (
+        patch("fn_predict.get_containers", return_value=(
+            mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
+        )),
+        patch("fn_predict.get_anthropic_client", return_value=mock_claude),
+        patch("fn_predict.search_team_news", new=AsyncMock()) as mock_search,
+        patch.dict(os.environ, env_without_serpa, clear=True),
+    ):
+        await predict_main(queue_msg)
+
+    mock_search.assert_not_called()
 
 
 @pytest.mark.asyncio

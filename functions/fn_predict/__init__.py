@@ -12,6 +12,7 @@ import anthropic
 from azure.cosmos.aio import CosmosClient
 
 from shared.cosmos import upsert_item, query_items
+from shared.serpa import search_team_news
 from fn_predict.scoring import compute_accuracy
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,11 @@ def get_anthropic_client() -> anthropic.AsyncAnthropic:
 # Prompt construction
 # ---------------------------------------------------------------------------
 
-def _build_prompt(teams: list[dict[str, Any]], fixtures: list[dict[str, Any]]) -> str:
+def _build_prompt(
+    teams: list[dict[str, Any]],
+    fixtures: list[dict[str, Any]],
+    news: dict[str, list[str]] | None = None,
+) -> str:
     from collections import defaultdict
 
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -97,6 +102,14 @@ def _build_prompt(teams: list[dict[str, Any]], fixtures: list[dict[str, Any]]) -
                 f"  MD{f['matchday']}: {f['homeTeam']} vs {f['awayTeam']}"
             )
 
+    if news:
+        lines.append("\nRECENT TEAM NEWS:")
+        for team_name, snippets in news.items():
+            if snippets:
+                lines.append(f"  {team_name}:")
+                for snippet in snippets:
+                    lines.append(f"    - {snippet}")
+
     return "\n".join(lines)
 
 
@@ -128,7 +141,15 @@ async def main(msg: func.QueueMessage) -> None:
     teams = await query_items(teams_container, "SELECT * FROM c")
     fixtures = await query_items(fixtures_container, "SELECT * FROM c")
 
-    prompt = _build_prompt(teams=teams, fixtures=fixtures)
+    news: dict[str, list[str]] = {}
+    serpa_key = os.environ.get("SERPA_API_KEY")
+    if serpa_key:
+        for team in teams:
+            team_name = team.get("name", "")
+            if team_name:
+                news[team_name] = await search_team_news(team_name, api_key=serpa_key)
+
+    prompt = _build_prompt(teams=teams, fixtures=fixtures, news=news or None)
 
     response = await claude.messages.create(
         model=_MODEL,
