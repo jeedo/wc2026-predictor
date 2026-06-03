@@ -215,6 +215,10 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     if route == "usage":
         return _handle_usage(usage_container)
 
+    if route == "predictions/trigger" and req.method == "POST":
+        # DEBUG: Just check if this route match causes issues
+        return _json_200({"debug": "route matched"})
+
     # fixtures/<matchday>
     m = re.fullmatch(r"fixtures/(\d+)", route)
     if m:
