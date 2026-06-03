@@ -169,6 +169,7 @@ stages:
     displayName: 'Deploy Frontend'
     dependsOn: functions
     variables:
+      functionAppName: $[ stageDependencies.infra.BicepDeploy.outputs['BicepOutput.functionAppName'] ]
       staticWebAppName: $[ stageDependencies.infra.BicepDeploy.outputs['BicepOutput.staticWebAppName'] ]
     jobs:
       - job: FrontendDeploy
@@ -188,7 +189,7 @@ stages:
           - script: |
               cd frontend
               FUNC_APP="$(functionAppName)"
-              export VITE_API_BASE_URL="https://${FUNC_APP}.azurewebsites.net/api"
+              export VITE_API_BASE_URL="https://${FUNC_APP}.azurewebsites.net"
               npm run build
             displayName: 'Build React app (inject VITE_API_BASE_URL)'
             env:
