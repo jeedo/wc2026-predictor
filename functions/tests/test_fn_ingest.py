@@ -13,6 +13,13 @@ def _timer_mock():
     return timer
 
 
+def _async_iter(items):
+    async def _gen():
+        for item in items:
+            yield item
+    return _gen()
+
+
 # ---------------------------------------------------------------------------
 # _should_enqueue
 # ---------------------------------------------------------------------------
@@ -67,11 +74,11 @@ async def test_ingest_seeds_teams_on_first_run():
     timer = _timer_mock()
 
     mock_teams_container = MagicMock()
-    mock_teams_container.query_items = MagicMock(return_value=iter([]))  # empty
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([]))  # empty
     mock_teams_container.upsert_item = AsyncMock()
 
     mock_fixtures_container = MagicMock()
-    mock_fixtures_container.query_items = MagicMock(return_value=iter([]))
+    mock_fixtures_container.query_items = MagicMock(return_value=_async_iter([]))
     mock_fixtures_container.read_item = AsyncMock(side_effect=Exception("not found"))
     mock_fixtures_container.upsert_item = AsyncMock()
 
@@ -101,7 +108,7 @@ async def test_ingest_enqueues_on_finished_transition():
     timer = _timer_mock()
 
     mock_teams_container = MagicMock()
-    mock_teams_container.query_items = MagicMock(return_value=iter([{"id": "t1"}]))  # not empty
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([{"id": "t1"}]))  # not empty
 
     mock_fixtures_container = MagicMock()
     mock_fixtures_container.read_item = AsyncMock(

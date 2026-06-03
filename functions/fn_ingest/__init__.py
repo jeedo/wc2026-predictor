@@ -94,7 +94,7 @@ async def main(mytimer: func.TimerRequest) -> None:
 
     async with httpx.AsyncClient() as http:
         # Seed teams on first run (container empty)
-        existing = query_items(teams_container, "SELECT VALUE COUNT(1) FROM c")
+        existing = await query_items(teams_container, "SELECT VALUE COUNT(1) FROM c")
         if not existing or existing[0] == 0:
             raw_teams = await fetch_teams(api, http)
             for raw in raw_teams:

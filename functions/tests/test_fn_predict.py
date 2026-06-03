@@ -7,6 +7,13 @@ import pytest
 from fn_predict import main as predict_main, _build_prompt, _parse_claude_response
 
 
+def _async_iter(items):
+    async def _gen():
+        for item in items:
+            yield item
+    return _gen()
+
+
 # ---------------------------------------------------------------------------
 # _build_prompt
 # ---------------------------------------------------------------------------
@@ -105,10 +112,10 @@ CLAUDE_PREDICTIONS = json.dumps({
 async def test_predict_writes_prediction_doc(queue_msg):
     mock_teams_container = MagicMock()
     mock_teams_container.query_items = MagicMock(
-        return_value=iter([_make_team("A", "Germany")])
+        return_value=_async_iter([_make_team("A", "Germany")])
     )
     mock_fixtures_container = MagicMock()
-    mock_fixtures_container.query_items = MagicMock(return_value=iter([]))
+    mock_fixtures_container.query_items = MagicMock(return_value=_async_iter([]))
     mock_predictions_container = MagicMock()
     mock_predictions_container.upsert_item = AsyncMock()
 
@@ -136,10 +143,10 @@ async def test_predict_overwrites_on_second_call(queue_msg):
     """Second call with same matchday should overwrite (idempotent)."""
     mock_teams_container = MagicMock()
     mock_teams_container.query_items = MagicMock(
-        return_value=iter([_make_team("A", "Germany")])
+        return_value=_async_iter([_make_team("A", "Germany")])
     )
     mock_fixtures_container = MagicMock()
-    mock_fixtures_container.query_items = MagicMock(return_value=iter([]))
+    mock_fixtures_container.query_items = MagicMock(return_value=_async_iter([]))
     mock_predictions_container = MagicMock()
     mock_predictions_container.upsert_item = AsyncMock()
 

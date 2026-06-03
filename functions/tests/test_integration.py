@@ -29,7 +29,19 @@ class InMemContainer:
         self._docs: dict = {}
 
     def query_items(self, query="", parameters=None, **kwargs):
-        return iter(list(self._docs.values()))
+        # Must return an async iterable for fn_ingest/fn_predict (async CosmosClient)
+        # and a sync iterable for fn_api (sync CosmosClient via query_items_sync)
+        items = list(self._docs.values())
+        async def _aiter():
+            for item in items:
+                yield item
+        # Return object that supports both sync iter (for query_items_sync) and async iter
+        class _DualIterable:
+            def __iter__(self_):
+                return iter(items)
+            def __aiter__(self_):
+                return _aiter().__aiter__()
+        return _DualIterable()
 
     async def upsert_item(self, body):
         self._docs[body["id"]] = body

@@ -23,16 +23,19 @@ async def read_item(
     return await container.read_item(item=item_id, partition_key=partition_key)
 
 
-def query_items(
+async def query_items(
     container: Any,
     query: str,
     parameters: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """For use with the async CosmosClient (fn_ingest, fn_predict)."""
+    """Async iteration over AsyncItemPaged — for use with the async CosmosClient."""
     kwargs: dict[str, Any] = {"query": query, "enable_cross_partition_query": True}
     if parameters:
         kwargs["parameters"] = parameters
-    return list(container.query_items(**kwargs))
+    results: list[dict[str, Any]] = []
+    async for item in container.query_items(**kwargs):
+        results.append(item)
+    return results
 
 
 def query_items_sync(

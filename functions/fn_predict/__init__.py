@@ -102,8 +102,8 @@ async def main(msg: func.QueueMessage) -> None:
     teams_container, fixtures_container, predictions_container, scores_container = get_containers()
     claude = get_anthropic_client()
 
-    teams = query_items(teams_container, "SELECT * FROM c")
-    fixtures = query_items(fixtures_container, "SELECT * FROM c")
+    teams = await query_items(teams_container, "SELECT * FROM c")
+    fixtures = await query_items(fixtures_container, "SELECT * FROM c")
 
     prompt = _build_prompt(teams=teams, fixtures=fixtures)
 
@@ -130,7 +130,7 @@ async def main(msg: func.QueueMessage) -> None:
     # Accuracy scoring against completed fixtures
     finished_fixtures = [f for f in fixtures if f.get("status") == "FT"]
     if finished_fixtures and predictions:
-        standings = query_items(
+        standings = await query_items(
             fixtures_container,
             "SELECT * FROM c WHERE c.status = 'FT'",
         )
