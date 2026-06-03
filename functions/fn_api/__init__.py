@@ -41,6 +41,14 @@ def get_containers() -> tuple[Any, Any, Any, Any, Any]:
     )
 
 
+def get_queue_client() -> QueueClient:
+    """DEBUG: Test if this function causes issues."""
+    return QueueClient.from_connection_string(
+        os.environ["AzureWebJobsStorage"],
+        queue_name=os.environ.get("PREDICT_QUEUE_NAME", "predict-trigger"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
