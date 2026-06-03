@@ -167,7 +167,9 @@ stages:
   # ---------------------------------------------------------------------------
   - stage: frontend
     displayName: 'Deploy Frontend'
-    dependsOn: functions
+    dependsOn:
+      - infra
+      - functions
     variables:
       functionAppName: $[ stageDependencies.infra.BicepDeploy.outputs['BicepOutput.functionAppName'] ]
       staticWebAppName: $[ stageDependencies.infra.BicepDeploy.outputs['BicepOutput.staticWebAppName'] ]
