@@ -194,29 +194,12 @@ def _json_404(message: str) -> func.HttpResponse:
 
 
 def _handle_trigger_predictions(queue_client: QueueClient, req: func.HttpRequest) -> func.HttpResponse:
+    """Trigger predictions on-demand."""
     try:
-        body = req.get_json()
-    except ValueError:
-        body = {}
-    matchday = body.get("matchday", 1)
-    if not isinstance(matchday, int) or matchday < 1:
-        return func.HttpResponse(
-            json.dumps({"error": "matchday must be a positive integer"}),
-            status_code=400,
-            mimetype="application/json",
-        )
-    message = json.dumps({"matchday": matchday, "fixtureId": None})
-    try:
-        queue_client.send_message(message)
-        logger.info("Enqueued predict trigger for matchday %s", matchday)
-        return _json_200({"status": "queued", "matchday": matchday})
+        return _json_200({"status": "ok", "debug": "handler reached"})
     except Exception as e:
-        logger.error("Failed to enqueue predict trigger: %s", str(e), exc_info=True)
-        return func.HttpResponse(
-            json.dumps({"error": "Failed to queue prediction request"}),
-            status_code=500,
-            mimetype="application/json",
-        )
+        logger.error("Debug handler error: %s", str(e), exc_info=True)
+        return _json_200({"status": "error", "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
