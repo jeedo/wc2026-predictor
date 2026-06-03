@@ -10,6 +10,23 @@ function TeamList({ teams }) {
   )
 }
 
+function MatchPredictions({ matches }) {
+  if (!matches?.length) return null
+  return (
+    <div className="match-predictions">
+      <h3 className="match-predictions-title">Match Predictions</h3>
+      {matches.map((m, i) => (
+        <div key={i} className="match-prediction-row">
+          <span className="mp-team home">{m.homeTeam}</span>
+          <span className="mp-score">{m.predictedHomeScore} – {m.predictedAwayScore}</span>
+          <span className="mp-team away">{m.awayTeam}</span>
+          <span className="mp-md">MD{m.matchday}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function GroupCard({ group, teams = [], prediction }) {
   return (
     <div className="group-card">
@@ -28,6 +45,7 @@ function GroupCard({ group, teams = [], prediction }) {
           {prediction.reasoning && (
             <p className="reasoning">{prediction.reasoning}</p>
           )}
+          <MatchPredictions matches={prediction.matches} />
         </div>
       ) : (
         <TeamList teams={teams} />
