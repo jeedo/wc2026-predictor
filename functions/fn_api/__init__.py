@@ -12,6 +12,7 @@ from typing import Any
 
 import azure.functions as func
 from azure.cosmos import CosmosClient  # sync client — fn_api is synchronous
+from azure.storage.queue import QueueClient  # DEBUG: test if this import causes the issue
 
 from shared.cosmos import query_items_sync as query_items
 from shared.usage_tracker import PROVIDER_LIMITS
