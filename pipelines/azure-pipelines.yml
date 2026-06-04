@@ -118,56 +118,31 @@ stages:
       functionAppName: $[ stageDependencies.infra.BicepDeploy.outputs['BicepOutput.functionAppName'] ]
     jobs:
       - job: FunctionsDeploy
-        displayName: 'uv build + az functionapp deploy'
+        displayName: 'Deploy Functions with Remote Build'
         pool:
           vmImage: ubuntu-latest
         steps:
-          - task: UsePythonVersion@0
-            inputs:
-              versionSpec: $(pythonVersion)
-
           - script: |
-              curl -LsSf https://astral.sh/uv/install.sh | sh
-              echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-              export PATH="$HOME/.cargo/bin:$PATH"
-              uv --version
-            displayName: 'Install uv'
-
-          - script: |
-              set -euo pipefail
-              export PATH="$HOME/.cargo/bin:$PATH"
               cd functions
-
-              # Use uv sync to create venv from uv.lock
-              uv sync --no-dev
-
-              # Find the Python version in venv and copy site-packages
-              PYTHON_DIR=$(find .venv/lib -maxdepth 1 -type d -name "python*" | head -1)
-              if [ -z "$PYTHON_DIR" ]; then
-                echo "ERROR: No Python directory found in .venv/lib"
-                ls -la .venv/lib/
-                exit 1
-              fi
-
-              echo "Found Python directory: $PYTHON_DIR"
-              mkdir -p .python_packages/lib/site-packages
-              cp -rv "$PYTHON_DIR/site-packages/"* .python_packages/lib/site-packages/
-              echo "Dependencies copied successfully"
-            displayName: 'Install dependencies with uv sync into .python_packages'
+              echo "Preparing functions directory for remote build..."
+              ls -la | grep -E "(pyproject|uv\.lock|function_app|fn_)"
+            displayName: 'Verify pyproject.toml and uv.lock'
 
           - script: |
               cd functions
+              # Exclude dev dependencies, tests, and cache
               zip -r ../functions.zip . \
                 --exclude "*.pyc" \
                 --exclude "__pycache__/*" \
                 --exclude ".venv/*" \
                 --exclude "tests/*" \
-                --exclude "*.lock" \
-                --exclude "*.egg-info/*"
-            displayName: 'Zip function app (includes .python_packages)'
+                --exclude "*.egg-info/*" \
+                --exclude ".pytest_cache/*"
+              ls -lh ../functions.zip
+            displayName: 'Zip function app source'
 
           - task: AzureCLI@2
-            displayName: 'Deploy to Azure Functions'
+            displayName: 'Deploy to Azure Functions (Remote Build enabled)'
             inputs:
               azureSubscription: $(azureSubscription)
               scriptType: bash
@@ -177,7 +152,8 @@ stages:
                 az functionapp deployment source config-zip \
                   --resource-group $(resourceGroup) \
                   --name "$(functionAppName)" \
-                  --src functions.zip
+                  --src functions.zip \
+                  --build-remote true
 
   # ---------------------------------------------------------------------------
   # Stage 3: Frontend
