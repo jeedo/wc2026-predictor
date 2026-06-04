@@ -76,7 +76,9 @@ test(auth): add edge cases for expired tokens
 - Always use `uv` — never pip, never poetry
 - Add runtime dependency: `uv add <package>`
 - Add dev dependency: `uv add --dev <package>`
-- Run commands: `uv run <command>`
+- **Run Python locally: always use `uv run <command>`** — ensures the correct Python version (from `requires-python` in pyproject.toml) is used
+  - Example: `uv run python scripts/check_docs.py` (not bare `python scripts/check_docs.py`)
+  - Example: `uv run pytest` (not bare `pytest`)
 - Never manually edit dependency lists in `pyproject.toml`
 
 ---
