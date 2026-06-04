@@ -1,6 +1,7 @@
 """fn_predict — Queue Trigger: build a Claude prompt, call the API, write predictions."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -141,7 +142,12 @@ def _parse_claude_response(text: str) -> list[dict[str, Any]]:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-async def main(msg: func.QueueMessage) -> None:
+def main(msg: func.QueueMessage) -> None:
+    logger.info("Prediction queue message received")
+    asyncio.run(_main_async(msg))
+
+
+async def _main_async(msg: func.QueueMessage) -> None:
     try:
         payload = json.loads(msg.get_body().decode())
         matchday: int = payload["matchday"]
