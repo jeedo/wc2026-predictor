@@ -703,6 +703,7 @@ name = "functions"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "anthropic" },
     { name = "azure-cosmos" },
     { name = "azure-functions", version = "1.24.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
@@ -724,6 +725,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.10.0" },
     { name = "anthropic", specifier = ">=0.105.2" },
     { name = "azure-cosmos", specifier = ">=4.16.1" },
     { name = "azure-functions", specifier = ">=1.24.0" },
