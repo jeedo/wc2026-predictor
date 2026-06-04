@@ -94,6 +94,21 @@ gh issue list
 
 ---
 
+## Deployment & CI/CD
+
+**Azure DevOps Pipeline Auto-Deploy:**
+- `git push` to main triggers the Azure DevOps pipeline automatically
+- **DO NOT run manual `func azure functionapp publish` after pushing to git** — the pipeline will handle it
+- Manual deploys should only be used during local debugging/testing
+- Check pipeline status via Azure DevOps portal or by waiting for logs to appear in App Insights (~2-3 min)
+
+**Checking Deployment Status:**
+- Use App Insights to verify logs (traces, exceptions, requests) after deployment
+- Function app should log execution details if `APPINSIGHTS_INSTRUMENTATIONKEY` is set in app settings
+- If no logs appear, check that the instrumentation key is configured: `az functionapp config appsettings list`
+
+---
+
 ## Task Management Scripts
 
 Run from the project root:
