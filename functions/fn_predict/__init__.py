@@ -130,12 +130,27 @@ def _build_prompt(
 # ---------------------------------------------------------------------------
 
 def _parse_claude_response(text: str) -> list[dict[str, Any]]:
+    """Parse Claude's prediction response, extracting JSON from potentially wrapped text."""
     try:
+        # Try direct parsing first
         data = json.loads(text)
         return data.get("predictions", [])
-    except (json.JSONDecodeError, AttributeError):
-        logger.error("Failed to parse Claude response: %.200s", text)
-        return []
+    except json.JSONDecodeError:
+        pass
+
+    # Try extracting JSON if it's wrapped in text
+    # Look for {..."predictions"... pattern
+    import re
+    match = re.search(r'\{[\s\S]*"predictions"[\s\S]*\}', text)
+    if match:
+        try:
+            data = json.loads(match.group())
+            return data.get("predictions", [])
+        except json.JSONDecodeError:
+            pass
+
+    logger.error("Failed to parse Claude response. Length: %d, First 200 chars: %.200s", len(text), text)
+    return []
 
 
 # ---------------------------------------------------------------------------
