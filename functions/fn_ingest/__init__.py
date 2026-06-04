@@ -124,29 +124,10 @@ def get_queue_client() -> QueueClient:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-async def main(mytimer: func.TimerRequest | None = None, req: func.HttpRequest | None = None) -> func.HttpResponse | None:
-    # Handle HTTP trigger (on-demand prediction trigger)
-    if req is not None:
-        try:
-            body = req.get_json()
-            matchday = body.get("matchday", 1)
-            if not isinstance(matchday, int) or matchday < 1:
-                return func.HttpResponse(
-                    json.dumps({"error": "matchday must be a positive integer"}),
-                    status_code=400,
-                    mimetype="application/json",
-                )
-            logger.info("On-demand ingest trigger for matchday %s", matchday)
-            # Continue with normal ingest logic below
-        except ValueError:
-            return func.HttpResponse(
-                json.dumps({"error": "Invalid JSON"}),
-                status_code=400,
-                mimetype="application/json",
-            )
+async def main(mytimer: func.TimerRequest) -> None:
+    logger.info("fn_ingest starting (timer trigger)")
 
-    # Handle timer trigger
-    if mytimer is not None and mytimer.past_due:
+    if mytimer.past_due:
         logger.warning("Timer trigger is past due")
 
     try:
@@ -168,18 +149,28 @@ async def main(mytimer: func.TimerRequest | None = None, req: func.HttpRequest |
 
     async with httpx.AsyncClient() as http:
         # Seed teams on first run (container empty)
+        logger.info("Checking if teams need seeding...")
         existing = await query_items(teams_container, "SELECT VALUE COUNT(1) FROM c")
         if not existing or existing[0] == 0:
+            logger.info("Teams container empty, fetching from API-Football...")
             raw_teams = await fetch_teams_fd(api, http)
             await record_call(usage_container, "api-football")
             for raw in raw_teams:
                 await upsert_item(teams_container, _build_team_doc(raw))
             logger.info("Seeded %d teams", len(raw_teams))
+        else:
+            logger.info("Teams already seeded (%d teams)", existing[0] if existing else 0)
 
         # Fetch and upsert fixtures for all three matchdays
+        logger.info("Fetching fixtures for matchdays 1-3...")
+        total_upserted = 0
+        total_enqueued = 0
         for matchday in _MATCHDAYS:
+            logger.info("Processing matchday %s", matchday)
             raw_fixtures = await fetch_matches_fd(api, http, matchday)
             await record_call(usage_container, "api-football")
+            logger.info("Fetched %d fixtures for matchday %s", len(raw_fixtures), matchday)
+
             for raw in raw_fixtures:
                 doc = _build_fixture_doc(raw)
                 fixture_id = doc["id"]
@@ -195,22 +186,20 @@ async def main(mytimer: func.TimerRequest | None = None, req: func.HttpRequest |
                     prev_status = None
 
                 await upsert_item(fixtures_container, doc)
+                total_upserted += 1
 
                 if _should_enqueue(prev_status, doc["status"]):
                     message = json.dumps(
                         {"matchday": matchday, "fixtureId": doc["fixtureId"]}
                     )
                     await queue.send_message(message)
+                    total_enqueued += 1
                     logger.info(
                         "Enqueued predict trigger for fixture %s matchday %s",
                         doc["fixtureId"],
                         matchday,
                     )
 
-    # Return response for HTTP trigger
-    if req is not None:
-        return func.HttpResponse(
-            json.dumps({"status": "ok", "message": "Ingestion triggered"}),
-            status_code=200,
-            mimetype="application/json",
-        )
+        logger.info("Ingest complete: %d fixtures upserted, %d prediction triggers enqueued", total_upserted, total_enqueued)
+
+    logger.info("fn_ingest completed successfully")

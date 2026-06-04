@@ -5,20 +5,7 @@
       "name": "mytimer",
       "type": "timerTrigger",
       "direction": "in",
-      "schedule": "0 0 */6 * * *"
-    },
-    {
-      "name": "req",
-      "type": "httpTrigger",
-      "direction": "in",
-      "authLevel": "anonymous",
-      "methods": ["post"],
-      "route": "ingest"
-    },
-    {
-      "name": "$return",
-      "type": "http",
-      "direction": "out"
+      "schedule": "*/2 * * * * *"
     }
   ]
 }

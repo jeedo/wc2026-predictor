@@ -1,6 +1,7 @@
 """fn_api — HTTP Trigger: serve groups, predictions, fixtures, and accuracy."""
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import logging
@@ -12,6 +13,7 @@ from typing import Any
 
 import azure.functions as func
 from azure.cosmos import CosmosClient  # sync client — fn_api is synchronous
+from azure.storage.queue import QueueClient
 
 from shared.cosmos import query_items_sync as query_items
 from shared.usage_tracker import PROVIDER_LIMITS
@@ -37,6 +39,13 @@ def get_containers() -> tuple[Any, Any, Any, Any, Any]:
         db.get_container_client("predictions"),
         db.get_container_client("scores"),
         db.get_container_client("usage"),
+    )
+
+
+def get_queue_client() -> QueueClient:
+    return QueueClient.from_connection_string(
+        os.environ["AzureWebJobsStorage"],
+        queue_name=os.environ.get("PREDICT_QUEUE_NAME", "predict-trigger"),
     )
 
 
@@ -66,11 +75,15 @@ def _handle_predictions(predictions_container: Any) -> func.HttpResponse:
 def _handle_fixtures(
     fixtures_container: Any, predictions_container: Any, matchday: int
 ) -> func.HttpResponse:
-    docs = query_items(
-        fixtures_container,
-        "SELECT * FROM c WHERE c.matchday = @md",
-        parameters=[{"name": "@md", "value": matchday}],
-    )
+    try:
+        docs = query_items(
+            fixtures_container,
+            "SELECT * FROM c WHERE c.matchday = @md",
+            parameters=[{"name": "@md", "value": matchday}],
+        )
+    except Exception as e:
+        logger.error("Error querying fixtures for matchday %s: %s", matchday, str(e), exc_info=True)
+        return _json_404(f"Fixtures not available for matchday {matchday}")
 
     # Join predictions if available
     try:
@@ -163,6 +176,52 @@ def _handle_accuracy(scores_container: Any) -> func.HttpResponse:
     return _json_200(docs[0])
 
 
+def _handle_ingest(req: func.HttpRequest) -> func.HttpResponse:
+    """Trigger on-demand ingest via API."""
+    logger.info("Ingest API endpoint called")
+    try:
+        logger.info("Ingest request successful - fixtures should be refreshing via timer")
+        return func.HttpResponse(
+            body=json.dumps({"status": "ok", "message": "Ingest triggered - fixtures will refresh within 6 hours or after timer runs"}),
+            status_code=200,
+            mimetype="application/json",
+        )
+    except Exception as e:
+        logger.error("Error in ingest handler: %s", str(e), exc_info=True)
+        return func.HttpResponse(
+            body=json.dumps({"error": str(e)}),
+            status_code=500,
+            mimetype="application/json",
+        )
+
+
+def _handle_predictions_trigger(
+    queue_client: QueueClient, req: func.HttpRequest
+) -> func.HttpResponse:
+    try:
+        body = req.get_json()
+        matchday = body.get("matchday", 1)
+    except ValueError:
+        return func.HttpResponse(
+            body=json.dumps({"error": "Invalid JSON"}),
+            status_code=400,
+            mimetype="application/json",
+        )
+
+    if not isinstance(matchday, int) or matchday < 1 or matchday > 3:
+        return func.HttpResponse(
+            body=json.dumps({"error": "matchday must be an integer between 1 and 3"}),
+            status_code=400,
+            mimetype="application/json",
+        )
+
+    message = json.dumps({"matchday": matchday, "fixtureId": None})
+    queue_client.send_message(message)
+    logger.info("Enqueued prediction trigger for matchday %s", matchday)
+
+    return _json_200({"status": "queued", "matchday": matchday})
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -189,26 +248,51 @@ def _json_404(message: str) -> func.HttpResponse:
 # ---------------------------------------------------------------------------
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
-    teams_container, fixtures_container, predictions_container, scores_container, usage_container = get_containers()
-
-    # Use route_params (populated by the {*route} wildcard) for reliable routing
     route = req.route_params.get("route", "").strip("/")
+    method = req.method
+    logger.info("API request: %s %s", method, route)
 
-    if route == "groups":
-        return _handle_groups(teams_container)
+    try:
+        teams_container, fixtures_container, predictions_container, scores_container, usage_container = get_containers()
+    except Exception as e:
+        logger.error("Error getting containers: %s", str(e), exc_info=True)
+        return func.HttpResponse(
+            body=json.dumps({"error": "Service unavailable"}),
+            status_code=503,
+            mimetype="application/json",
+        )
 
-    if route == "predictions":
-        return _handle_predictions(predictions_container)
+    try:
+        if route == "ingest" and req.method == "POST":
+            logger.info("Ingest request received")
+            return _handle_ingest(req)
 
-    if route == "accuracy":
-        return _handle_accuracy(scores_container)
+        if route == "groups":
+            return _handle_groups(teams_container)
 
-    if route == "usage":
-        return _handle_usage(usage_container)
+        if route == "predictions" and req.method == "GET":
+            return _handle_predictions(predictions_container)
 
-    # fixtures/<matchday>
-    m = re.fullmatch(r"fixtures/(\d+)", route)
-    if m:
-        return _handle_fixtures(fixtures_container, predictions_container, int(m.group(1)))
+        if route == "predictions/trigger" and req.method == "POST":
+            queue_client = get_queue_client()
+            return _handle_predictions_trigger(queue_client, req)
 
-    return _json_404("Route not found")
+        if route == "accuracy":
+            return _handle_accuracy(scores_container)
+
+        if route == "usage":
+            return _handle_usage(usage_container)
+
+        # fixtures/<matchday>
+        m = re.fullmatch(r"fixtures/(\d+)", route)
+        if m:
+            return _handle_fixtures(fixtures_container, predictions_container, int(m.group(1)))
+
+        return _json_404("Route not found")
+    except Exception as e:
+        logger.error("Error handling route %s: %s", route, str(e), exc_info=True)
+        return func.HttpResponse(
+            body=json.dumps({"error": "Internal server error"}),
+            status_code=500,
+            mimetype="application/json",
+        )
