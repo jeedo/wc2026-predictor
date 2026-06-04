@@ -1,15 +1,18 @@
 """HTTP client for football-data.org v4 API."""
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
+logger = logging.getLogger(__name__)
+
 _BASE_URL = "https://api.football-data.org/v4"
-_COMPETITION = "WC"
-_SEASON = 2026
+_COMPETITION_CODE = "WC"
+_COMPETITION_ID = "2000"
 
 
 @dataclass
@@ -29,29 +32,28 @@ async def fetch_teams_fd(
     client: FootballDataClient, http: httpx.AsyncClient
 ) -> list[dict[str, Any]]:
     """Fetch all 48 WC2026 teams from football-data.org."""
-    resp = await http.get(
-        f"{_BASE_URL}/competitions/{_COMPETITION}/teams",
-        headers=client.headers,
-        params={"season": _SEASON},
-    )
+    url = f"{_BASE_URL}/competitions/{_COMPETITION_ID}/teams"
+    logger.info("Fetching teams from: %s", url)
+    resp = await http.get(url, headers=client.headers)
     resp.raise_for_status()
-    return resp.json().get("teams", [])
+    teams = resp.json().get("teams", [])
+    logger.info("Fetched %d teams from Football Data API", len(teams))
+    return teams
 
 
 async def fetch_standings_fd(
     client: FootballDataClient, http: httpx.AsyncClient
 ) -> list[dict[str, Any]]:
     """Fetch group standings from football-data.org."""
-    resp = await http.get(
-        f"{_BASE_URL}/competitions/{_COMPETITION}/standings",
-        headers=client.headers,
-        params={"season": _SEASON},
-    )
+    url = f"{_BASE_URL}/competitions/{_COMPETITION_ID}/standings"
+    logger.info("Fetching standings from: %s", url)
+    resp = await http.get(url, headers=client.headers)
     resp.raise_for_status()
     flat: list[dict[str, Any]] = []
     for stage in resp.json().get("standings", []):
         if stage.get("type") == "GROUP":
             flat.extend(stage.get("table", []))
+    logger.info("Fetched standings for %d teams", len(flat))
     return flat
 
 
@@ -60,10 +62,14 @@ async def fetch_matches_fd(
     matchday: int,
 ) -> list[dict[str, Any]]:
     """Fetch fixtures for a given matchday."""
+    url = f"{_BASE_URL}/competitions/{_COMPETITION_ID}/matches"
+    logger.info("Fetching matches for matchday %d from: %s", matchday, url)
     resp = await http.get(
-        f"{_BASE_URL}/competitions/{_COMPETITION}/matches",
+        url,
         headers=client.headers,
-        params={"season": _SEASON, "matchday": matchday},
+        params={"matchday": matchday},
     )
     resp.raise_for_status()
-    return resp.json().get("matches", [])
+    matches = resp.json().get("matches", [])
+    logger.info("Fetched %d matches for matchday %d", len(matches), matchday)
+    return matches

@@ -96,29 +96,44 @@ def _handle_fixtures(
         )
         if prediction_docs:
             pred_doc = prediction_docs[0]
+            groups = pred_doc.get("groups", [])
+            logger.info("Found predictions document with %d groups", len(groups))
+
             # Build lookup: (homeTeam, awayTeam) → {predictedHomeScore, predictedAwayScore}
             pred_lookup: dict[tuple[str, str], dict[str, Any]] = {}
-            for group in pred_doc.get("groups", []):
+            matches_for_md = 0
+            for group in groups:
                 for match in group.get("matches", []):
                     if match.get("matchday") == matchday:
+                        matches_for_md += 1
                         key = (match.get("homeTeam", ""), match.get("awayTeam", ""))
                         pred_lookup[key] = {
                             "predictedHomeScore": match.get("predictedHomeScore"),
                             "predictedAwayScore": match.get("predictedAwayScore"),
                         }
 
+            logger.info("Found %d prediction matches for matchday %d", matches_for_md, matchday)
+            logger.debug("Prediction lookup keys: %s", list(pred_lookup.keys())[:5])
+
             # Merge predictions onto fixtures (deep copy to avoid mutating originals)
             docs_with_preds = []
+            matched_count = 0
             for doc in docs:
                 doc_copy = copy.deepcopy(doc)
                 key = (doc_copy.get("homeTeam", ""), doc_copy.get("awayTeam", ""))
                 if key in pred_lookup:
                     doc_copy["predictedHomeScore"] = pred_lookup[key]["predictedHomeScore"]
                     doc_copy["predictedAwayScore"] = pred_lookup[key]["predictedAwayScore"]
+                    matched_count += 1
+                    logger.debug("Matched prediction for %s vs %s", key[0], key[1])
                 docs_with_preds.append(doc_copy)
+
+            logger.info("Matched %d/%d fixtures with predictions for matchday %d", matched_count, len(docs), matchday)
             docs = docs_with_preds
+        else:
+            logger.warning("No predictions document found (expected id: 'predictions-all')")
     except Exception as e:
-        logger.warning("Failed to join predictions for matchday %s: %s", matchday, e)
+        logger.warning("Failed to join predictions for matchday %s: %s", matchday, e, exc_info=True)
 
     return _json_200({"matchday": matchday, "fixtures": docs})
 

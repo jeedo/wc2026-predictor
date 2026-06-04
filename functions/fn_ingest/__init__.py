@@ -152,29 +152,53 @@ async def main(mytimer: func.TimerRequest) -> None:
         logger.info("Checking if teams need seeding...")
         existing = await query_items(teams_container, "SELECT VALUE COUNT(1) FROM c")
         if not existing or existing[0] == 0:
-            logger.info("Teams container empty, fetching from API-Football...")
+            logger.info("Teams container empty, fetching 2026 World Cup teams from Football Data API...")
             raw_teams = await fetch_teams_fd(api, http)
             await record_call(usage_container, "api-football")
+
+            logger.info("Processing %d teams into Cosmos DB documents", len(raw_teams))
+            by_group = {}
             for raw in raw_teams:
+                team_name = raw.get("name", "Unknown")
+                team_group = raw.get("group", "Unknown")
+                if team_group not in by_group:
+                    by_group[team_group] = []
+                by_group[team_group].append(team_name)
                 await upsert_item(teams_container, _build_team_doc(raw))
-            logger.info("Seeded %d teams", len(raw_teams))
+
+            logger.info("Seeded %d teams in %d groups", len(raw_teams), len(by_group))
+            for group in sorted(by_group.keys()):
+                logger.info("  Group %s: %s", group, ", ".join(by_group[group]))
         else:
             logger.info("Teams already seeded (%d teams)", existing[0] if existing else 0)
 
         # Fetch and upsert fixtures for all three matchdays
-        logger.info("Fetching fixtures for matchdays 1-3...")
+        logger.info("Fetching fixtures for matchdays 1-3 from 2026 World Cup...")
         total_upserted = 0
         total_enqueued = 0
+        fixture_summary = {}
+
         for matchday in _MATCHDAYS:
-            logger.info("Processing matchday %s", matchday)
+            logger.info("Processing matchday %d", matchday)
             raw_fixtures = await fetch_matches_fd(api, http, matchday)
             await record_call(usage_container, "api-football")
-            logger.info("Fetched %d fixtures for matchday %s", len(raw_fixtures), matchday)
+
+            if not raw_fixtures:
+                logger.warning("No fixtures returned for matchday %d", matchday)
+                continue
+
+            logger.info("Processing %d fixtures for matchday %d", len(raw_fixtures), matchday)
+            fixture_summary[matchday] = {"count": len(raw_fixtures), "enqueued": 0}
 
             for raw in raw_fixtures:
                 doc = _build_fixture_doc(raw)
                 fixture_id = doc["id"]
                 partition_key = doc["matchday"]
+
+                # Log fixture details
+                home_team = doc.get("homeTeam", "Unknown")
+                away_team = doc.get("awayTeam", "Unknown")
+                logger.debug("Upserting fixture: %s vs %s (MD%d)", home_team, away_team, matchday)
 
                 # Determine previous status for transition detection
                 try:
@@ -194,12 +218,17 @@ async def main(mytimer: func.TimerRequest) -> None:
                     )
                     await queue.send_message(message)
                     total_enqueued += 1
+                    fixture_summary[matchday]["enqueued"] += 1
                     logger.info(
-                        "Enqueued predict trigger for fixture %s matchday %s",
-                        doc["fixtureId"],
+                        "Enqueued prediction trigger for %s vs %s (MD%d)",
+                        home_team,
+                        away_team,
                         matchday,
                     )
 
         logger.info("Ingest complete: %d fixtures upserted, %d prediction triggers enqueued", total_upserted, total_enqueued)
+        for matchday in sorted(fixture_summary.keys()):
+            info = fixture_summary[matchday]
+            logger.info("  Matchday %d: %d fixtures (%d enqueued)", matchday, info["count"], info["enqueued"])
 
     logger.info("fn_ingest completed successfully")
