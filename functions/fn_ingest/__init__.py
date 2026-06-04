@@ -57,6 +57,47 @@ def _should_enqueue(old_status: str | None, new_status: str) -> bool:
     return new_status == "FT" and old_status != "FT"
 
 
+def _derive_groups_from_fixtures(fixtures: list[dict[str, Any]]) -> dict[str, str]:
+    """Derive group assignments from matchday 1 fixtures.
+
+    Teams that play each other in matchday 1 belong to the same group.
+    Returns dict mapping team name -> group letter (A-L).
+    """
+    # Get all matchday 1 fixtures
+    md1_fixtures = [f for f in fixtures if f.get("matchday") == 1]
+
+    team_to_group: dict[str, str] = {}
+    group_count = 0
+
+    for fixture in md1_fixtures:
+        home = fixture.get("homeTeam", "")
+        away = fixture.get("awayTeam", "")
+
+        if not home or not away:
+            continue
+
+        home_group = team_to_group.get(home)
+        away_group = team_to_group.get(away)
+
+        if home_group and away_group:
+            # Both already assigned - skip
+            continue
+        elif home_group:
+            # Assign away to home's group
+            team_to_group[away] = home_group
+        elif away_group:
+            # Assign home to away's group
+            team_to_group[home] = away_group
+        else:
+            # Both unassigned - create new group
+            group_letter = chr(ord('A') + group_count)
+            team_to_group[home] = group_letter
+            team_to_group[away] = group_letter
+            group_count += 1
+
+    return team_to_group
+
+
 def _build_fixture_doc(raw: dict[str, Any]) -> dict[str, Any]:
     """Normalise a football-data.org match record to our schema."""
     score = raw.get("score", {})
@@ -79,15 +120,18 @@ def _build_fixture_doc(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_team_doc(raw: dict[str, Any]) -> dict[str, Any]:
-    """Normalise a football-data.org team record to our schema."""
+def _build_team_doc(raw: dict[str, Any], group: str | None = None) -> dict[str, Any]:
+    """Normalise a football-data.org team record to our schema.
+
+    If group is provided, use it. Otherwise fall back to API data or "Unknown".
+    """
     return {
         "id": f"team-{raw['id']}",
         "teamId": raw["id"],
         "name": raw["name"],
         "shortName": raw.get("shortName", raw["name"]),
         "crestUrl": raw.get("crest", ""),
-        "group": raw.get("group") or "Unknown",
+        "group": group or raw.get("group") or "Unknown",
         "fifaRanking": None,
         "recentForm": [],
         "squadDepth": None,
@@ -148,6 +192,19 @@ async def main(mytimer: func.TimerRequest) -> None:
     usage_container = get_usage_container()
 
     async with httpx.AsyncClient() as http:
+        # Fetch all fixtures first to derive group assignments
+        logger.info("Fetching fixtures for matchdays 1-3 from 2026 World Cup...")
+        all_fixtures = []
+        for matchday in _MATCHDAYS:
+            raw_fixtures = await fetch_matches_fd(api, http, matchday)
+            await record_call(usage_container, "api-football")
+            all_fixtures.extend(raw_fixtures)
+
+        # Derive groups from matchday 1 fixtures (where teams only play other teams in their group)
+        built_fixtures = [_build_fixture_doc(f) for f in all_fixtures]
+        team_to_group = _derive_groups_from_fixtures(built_fixtures)
+        logger.info("Derived %d group assignments from fixtures", len(team_to_group))
+
         # Seed teams on first run (container empty)
         logger.info("Checking if teams need seeding...")
         existing = await query_items(teams_container, "SELECT VALUE COUNT(1) FROM c")
@@ -160,11 +217,12 @@ async def main(mytimer: func.TimerRequest) -> None:
             by_group = {}
             for raw in raw_teams:
                 team_name = raw.get("name", "Unknown")
-                team_group = raw.get("group", "Unknown")
+                # Use derived group if available, otherwise use API data or default
+                team_group = team_to_group.get(team_name) or raw.get("group") or "Unknown"
                 if team_group not in by_group:
                     by_group[team_group] = []
                 by_group[team_group].append(team_name)
-                await upsert_item(teams_container, _build_team_doc(raw))
+                await upsert_item(teams_container, _build_team_doc(raw, group=team_group))
 
             logger.info("Seeded %d teams in %d groups", len(raw_teams), len(by_group))
             for group in sorted(by_group.keys()):
@@ -172,25 +230,25 @@ async def main(mytimer: func.TimerRequest) -> None:
         else:
             logger.info("Teams already seeded (%d teams)", existing[0] if existing else 0)
 
-        # Fetch and upsert fixtures for all three matchdays
-        logger.info("Fetching fixtures for matchdays 1-3 from 2026 World Cup...")
+        # Upsert fixtures for all three matchdays
+        logger.info("Upserting fixtures for matchdays 1-3...")
         total_upserted = 0
         total_enqueued = 0
         fixture_summary = {}
 
         for matchday in _MATCHDAYS:
             logger.info("Processing matchday %d", matchday)
-            raw_fixtures = await fetch_matches_fd(api, http, matchday)
-            await record_call(usage_container, "api-football")
+            # Filter pre-fetched fixtures by matchday
+            matchday_fixtures = [f for f in all_fixtures if f.get("matchday") == matchday]
 
-            if not raw_fixtures:
-                logger.warning("No fixtures returned for matchday %d", matchday)
+            if not matchday_fixtures:
+                logger.warning("No fixtures found for matchday %d", matchday)
                 continue
 
-            logger.info("Processing %d fixtures for matchday %d", len(raw_fixtures), matchday)
-            fixture_summary[matchday] = {"count": len(raw_fixtures), "enqueued": 0}
+            logger.info("Processing %d fixtures for matchday %d", len(matchday_fixtures), matchday)
+            fixture_summary[matchday] = {"count": len(matchday_fixtures), "enqueued": 0}
 
-            for raw in raw_fixtures:
+            for raw in matchday_fixtures:
                 doc = _build_fixture_doc(raw)
                 fixture_id = doc["id"]
                 partition_key = doc["matchday"]
