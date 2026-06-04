@@ -12,6 +12,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 import azure.functions as func
+import httpx
 from azure.cosmos import CosmosClient  # sync client — fn_api is synchronous
 from azure.storage.queue import QueueClient
 
@@ -176,13 +177,71 @@ def _handle_accuracy(scores_container: Any) -> func.HttpResponse:
     return _json_200(docs[0])
 
 
+def _ensure_cosmos_containers() -> tuple[Any, Any, Any, Any, Any]:
+    """Ensure required Cosmos containers exist, create if missing."""
+    cosmos = CosmosClient.from_connection_string(os.environ["CosmosDbConnectionString"])
+    db = cosmos.get_database_client(os.environ.get("COSMOS_DATABASE_NAME", "wc2026"))
+
+    containers_config = {
+        "fixtures": "/matchday",
+        "teams": "/group",
+        "predictions": "/matchday",
+        "scores": "/matchday",
+        "usage": "/provider",
+    }
+
+    for container_name, partition_key in containers_config.items():
+        try:
+            container = db.get_container_client(container_name)
+            container.read()
+            logger.info("Container '%s' exists", container_name)
+        except Exception as e:
+            logger.info("Creating container '%s' with partition key '%s'", container_name, partition_key)
+            try:
+                db.create_container(
+                    id=container_name,
+                    partition_key=partition_key,
+                    offer_throughput=400,
+                )
+                logger.info("Container '%s' created successfully", container_name)
+            except Exception as create_err:
+                logger.warning("Could not create container '%s': %s", container_name, str(create_err))
+
+    return (
+        db.get_container_client("teams"),
+        db.get_container_client("fixtures"),
+        db.get_container_client("predictions"),
+        db.get_container_client("scores"),
+        db.get_container_client("usage"),
+    )
+
+
 def _handle_ingest(req: func.HttpRequest) -> func.HttpResponse:
-    """Trigger on-demand ingest via API."""
-    logger.info("Ingest API endpoint called")
+    """Trigger on-demand ingest via API - fetches fixtures from API-Football."""
+    logger.info("On-demand ingest API endpoint called")
     try:
-        logger.info("Ingest request successful - fixtures should be refreshing via timer")
+        # Ensure containers exist first
+        logger.info("Ensuring Cosmos containers exist...")
+        teams_container, fixtures_container, predictions_container, scores_container, usage_container = _ensure_cosmos_containers()
+        logger.info("Cosmos containers ready")
+
+        # Run async ingest logic
+        logger.info("Calling fn_ingest main function...")
+        result = asyncio.run(_run_ingest_async(
+            teams_container,
+            fixtures_container,
+            predictions_container,
+            scores_container,
+            usage_container
+        ))
+
+        logger.info("Ingest completed: %s", result)
         return func.HttpResponse(
-            body=json.dumps({"status": "ok", "message": "Ingest triggered - fixtures will refresh within 6 hours or after timer runs"}),
+            body=json.dumps({
+                "status": "ok",
+                "message": "Ingest completed successfully",
+                "details": result
+            }),
             status_code=200,
             mimetype="application/json",
         )
@@ -193,6 +252,79 @@ def _handle_ingest(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500,
             mimetype="application/json",
         )
+
+
+async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predictions_container: Any, scores_container: Any, usage_container: Any) -> dict:
+    """Run the ingest logic asynchronously."""
+    from fn_ingest import (
+        _get_football_data_api_key,
+        _build_team_doc,
+        _build_fixture_doc,
+        _should_enqueue,
+        get_queue_client,
+    )
+    from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd
+    from shared.cosmos import upsert_item, query_items, read_item
+    from shared.usage_tracker import record_call
+
+    stats = {"teams_seeded": 0, "fixtures_upserted": 0, "predictions_enqueued": 0}
+
+    try:
+        api_key = _get_football_data_api_key()
+        api = FootballDataClient(api_key=api_key)
+        logger.info("Football-data API client initialized")
+    except Exception as e:
+        logger.error("Failed to get football-data API key: %s", str(e), exc_info=True)
+        raise
+
+    queue = get_queue_client()
+
+    async with httpx.AsyncClient() as http:
+        # Seed teams if empty
+        logger.info("Checking if teams need seeding...")
+        existing = await query_items(teams_container, "SELECT VALUE COUNT(1) FROM c")
+        if not existing or existing[0] == 0:
+            logger.info("Teams container empty, fetching from API-Football...")
+            raw_teams = await fetch_teams_fd(api, http)
+            await record_call(usage_container, "api-football")
+            for raw in raw_teams:
+                await upsert_item(teams_container, _build_team_doc(raw))
+            stats["teams_seeded"] = len(raw_teams)
+            logger.info("Seeded %d teams", len(raw_teams))
+        else:
+            logger.info("Teams already seeded (%d teams)", existing[0] if existing else 0)
+
+        # Fetch and upsert fixtures
+        logger.info("Fetching fixtures for matchdays 1-3...")
+        for matchday in [1, 2, 3]:
+            logger.info("Processing matchday %s", matchday)
+            raw_fixtures = await fetch_matches_fd(api, http, matchday)
+            await record_call(usage_container, "api-football")
+            logger.info("Fetched %d fixtures for matchday %s", len(raw_fixtures), matchday)
+
+            for raw in raw_fixtures:
+                doc = _build_fixture_doc(raw)
+                fixture_id = doc["id"]
+                partition_key = doc["matchday"]
+
+                # Determine previous status
+                try:
+                    prev = await read_item(fixtures_container, fixture_id, partition_key)
+                    prev_status = prev.get("status")
+                except Exception:
+                    prev_status = None
+
+                await upsert_item(fixtures_container, doc)
+                stats["fixtures_upserted"] += 1
+
+                if _should_enqueue(prev_status, doc["status"]):
+                    message = json.dumps({"matchday": matchday, "fixtureId": doc["fixtureId"]})
+                    await queue.send_message(message)
+                    stats["predictions_enqueued"] += 1
+                    logger.info("Enqueued prediction for fixture %s", doc["fixtureId"])
+
+    logger.info("Ingest complete: %s", stats)
+    return stats
 
 
 def _handle_predictions_trigger(
