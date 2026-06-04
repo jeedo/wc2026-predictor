@@ -10,6 +10,7 @@ from typing import Any
 
 import azure.functions as func
 import anthropic
+from pydantic import BaseModel, ConfigDict
 from azure.cosmos.aio import CosmosClient
 
 from shared.cosmos import upsert_item, query_items
@@ -19,8 +20,34 @@ from fn_predict.scoring import compute_accuracy
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "claude-haiku-4-5-20251001"
+_MODEL = "claude-sonnet-4-5"  # Upgraded to Sonnet for structured outputs
 _MAX_TOKENS = 4096
+
+
+# Pydantic models for structured output
+class PredictedMatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    homeTeam: str
+    awayTeam: str
+    matchday: int
+    predictedHomeScore: int
+    predictedAwayScore: int
+    confidence: str  # "high", "medium", "low"
+
+
+class GroupPrediction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    group: str
+    winner: str
+    runnerUp: str
+    confidence: str
+    reasoning: str
+    matches: list[PredictedMatch]
+
+
+class PredictionsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    predictions: list[GroupPrediction]
 
 
 # ---------------------------------------------------------------------------
@@ -147,27 +174,13 @@ def _build_prompt(
 # ---------------------------------------------------------------------------
 
 def _parse_claude_response(text: str) -> list[dict[str, Any]]:
-    """Parse Claude's prediction response, extracting JSON from potentially wrapped text."""
+    """Parse Claude's prediction response. With structured outputs, response is pure JSON."""
     try:
-        # Try direct parsing first
         data = json.loads(text)
         return data.get("predictions", [])
-    except json.JSONDecodeError:
-        pass
-
-    # Try extracting JSON if it's wrapped in text
-    # Look for {..."predictions"... pattern
-    import re
-    match = re.search(r'\{[\s\S]*"predictions"[\s\S]*\}', text)
-    if match:
-        try:
-            data = json.loads(match.group())
-            return data.get("predictions", [])
-        except json.JSONDecodeError:
-            pass
-
-    logger.error("Failed to parse Claude response. Length: %d, First 200 chars: %.200s", len(text), text)
-    return []
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse Claude structured output: %s. Response: %.200s", str(e), text)
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -205,10 +218,18 @@ async def _main_async(msg: func.QueueMessage) -> None:
 
         prompt = _build_prompt(teams=teams, fixtures=fixtures, news=news or None)
 
-        response = await claude.messages.create(
+        # Use structured outputs to guarantee valid JSON
+        response = await claude.beta.messages.parse(
             model=_MODEL,
             max_tokens=_MAX_TOKENS,
             messages=[{"role": "user", "content": prompt}],
+            output_config={
+                "format": {
+                    "type": "json_schema",
+                    "schema": PredictionsResponse.model_json_schema(),
+                }
+            },
+            betas=["structured-outputs-2025-11-13"],
         )
 
         usage = response.usage

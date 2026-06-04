@@ -22,3 +22,6 @@ frontend/.env.local
 # Local secrets
 .env
 functions/.python-version
+
+# Debug scripts
+debug/

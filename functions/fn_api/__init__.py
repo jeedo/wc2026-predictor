@@ -17,6 +17,7 @@ from azure.cosmos import CosmosClient  # sync client — fn_api is synchronous
 
 from shared.cosmos import query_items_sync as query_items
 from shared.usage_tracker import PROVIDER_LIMITS
+from fn_predict import PredictionsResponse
 
 logger = logging.getLogger(__name__)
 logger.info("fn_api module loaded successfully")
@@ -356,13 +357,20 @@ def _handle_predictions_generate(
         from fn_predict import _build_prompt, _parse_claude_response
         prompt = _build_prompt(teams=teams, fixtures=fixtures, news=None)
 
-        # Call Claude
+        # Call Claude with structured outputs
         import anthropic
         client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        response = client.beta.messages.parse(
+            model="claude-sonnet-4-5",
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
+            output_config={
+                "format": {
+                    "type": "json_schema",
+                    "schema": PredictionsResponse.model_json_schema(),
+                }
+            },
+            betas=["structured-outputs-2025-11-13"],
         )
 
         # Record usage
@@ -371,9 +379,9 @@ def _handle_predictions_generate(
                    inputTokens=response.usage.input_tokens,
                    outputTokens=response.usage.output_tokens)
 
-        # Parse and store predictions
+        # Parse and store predictions (structured output returns pure JSON)
         raw_text = response.content[0].text
-        logger.info("Claude response (first 500 chars): %s", raw_text[:500])
+        logger.info("Claude structured response: %d chars", len(raw_text))
 
         predictions = _parse_claude_response(raw_text)
         logger.info("Parsed %d groups from Claude response", len(predictions))

@@ -79,7 +79,8 @@ test(auth): add edge cases for expired tokens
 - **Run Python locally: always use `uv run <command>`** — ensures the correct Python version (from `requires-python` in pyproject.toml) is used
   - Example: `uv run python scripts/check_docs.py` (not bare `python scripts/check_docs.py`)
   - Example: `uv run pytest` (not bare `pytest`)
-  - For one-off scripts needing additional packages, use `--with`: `uv run --with 'rich>12,<13' example.py`
+  - For one-off scripts needing additional packages, use multiple `--with` flags
+  - **Always add `--with python-dotenv` to load .env files:** `uv run --with anthropic --with python-dotenv python script.py`
 - Never manually edit dependency lists in `pyproject.toml`
 
 ---
