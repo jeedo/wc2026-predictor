@@ -373,7 +373,10 @@ def _handle_predictions_generate(
 
         # Parse and store predictions
         raw_text = response.content[0].text
+        logger.info("Claude response (first 500 chars): %s", raw_text[:500])
+
         predictions = _parse_claude_response(raw_text)
+        logger.info("Parsed %d groups from Claude response", len(predictions))
 
         now = datetime.now(timezone.utc).isoformat()
         prediction_doc = {
@@ -390,7 +393,9 @@ def _handle_predictions_generate(
             "status": "generated",
             "matchday": matchday,
             "groups": len(predictions),
-            "message": "Predictions generated successfully"
+            "message": "Predictions generated successfully",
+            "claudeResponseLength": len(raw_text),
+            "parsedGroups": len(predictions)
         })
 
     except Exception as e:
