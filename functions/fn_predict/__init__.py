@@ -142,71 +142,77 @@ def _parse_claude_response(text: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 async def main(msg: func.QueueMessage) -> None:
-    payload = json.loads(msg.get_body().decode())
-    matchday: int = payload["matchday"]
-    logger.info("Generating predictions for matchday %s", matchday)
+    try:
+        payload = json.loads(msg.get_body().decode())
+        matchday: int = payload["matchday"]
+        logger.info("Generating predictions for matchday %s", matchday)
 
-    teams_container, fixtures_container, predictions_container, scores_container = get_containers()
-    usage_container = get_usage_container()
-    claude = get_anthropic_client()
+        teams_container, fixtures_container, predictions_container, scores_container = get_containers()
+        usage_container = get_usage_container()
+        claude = get_anthropic_client()
+        logger.info("Containers and clients initialized")
 
-    teams = await query_items(teams_container, "SELECT * FROM c")
-    fixtures = await query_items(fixtures_container, "SELECT * FROM c")
+        logger.info("Querying teams...")
+        teams = await query_items(teams_container, "SELECT * FROM c")
+        fixtures = await query_items(fixtures_container, "SELECT * FROM c")
 
-    news: dict[str, list[str]] = {}
-    serpa_key = os.environ.get("SERPA_API_KEY")
-    if serpa_key:
-        for team in teams:
-            team_name = team.get("name", "")
-            if team_name:
-                news[team_name] = await search_team_news(team_name, api_key=serpa_key)
-                await record_call(usage_container, "serper")
+        news: dict[str, list[str]] = {}
+        serpa_key = os.environ.get("SERPA_API_KEY")
+        if serpa_key:
+            for team in teams:
+                team_name = team.get("name", "")
+                if team_name:
+                    news[team_name] = await search_team_news(team_name, api_key=serpa_key)
+                    await record_call(usage_container, "serper")
 
-    prompt = _build_prompt(teams=teams, fixtures=fixtures, news=news or None)
+        prompt = _build_prompt(teams=teams, fixtures=fixtures, news=news or None)
 
-    response = await claude.messages.create(
-        model=_MODEL,
-        max_tokens=_MAX_TOKENS,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    usage = response.usage
-    await record_call(
-        usage_container, "anthropic",
-        inputTokens=usage.input_tokens,
-        outputTokens=usage.output_tokens,
-    )
-
-    raw_text = response.content[0].text
-    predictions = _parse_claude_response(raw_text)
-
-    now = datetime.now(timezone.utc).isoformat()
-
-    prediction_doc: dict[str, Any] = {
-        "id": f"prediction-md{matchday}",
-        "matchday": matchday,
-        "generatedAt": now,
-        "groups": predictions,
-    }
-    await upsert_item(predictions_container, prediction_doc)
-    logger.info("Wrote %d group predictions for matchday %s", len(predictions), matchday)
-
-    # Accuracy scoring against completed fixtures
-    finished_fixtures = [f for f in fixtures if f.get("status") == "FT"]
-    if finished_fixtures and predictions:
-        standings = await query_items(
-            fixtures_container,
-            "SELECT * FROM c WHERE c.status = 'FT'",
+        response = await claude.messages.create(
+            model=_MODEL,
+            max_tokens=_MAX_TOKENS,
+            messages=[{"role": "user", "content": prompt}],
         )
-        accuracy = compute_accuracy(predictions, standings)
-        score_doc: dict[str, Any] = {
-            "id": f"score-md{matchday}",
+
+        usage = response.usage
+        await record_call(
+            usage_container, "anthropic",
+            inputTokens=usage.input_tokens,
+            outputTokens=usage.output_tokens,
+        )
+
+        raw_text = response.content[0].text
+        predictions = _parse_claude_response(raw_text)
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        prediction_doc: dict[str, Any] = {
+            "id": f"prediction-md{matchday}",
             "matchday": matchday,
-            "evaluatedAt": now,
-            **accuracy,
+            "generatedAt": now,
+            "groups": predictions,
         }
-        await upsert_item(scores_container, score_doc)
-        logger.info(
-            "Accuracy for matchday %s: %s/%s",
-            matchday, accuracy["score"], accuracy["totalGroups"],
-        )
+        await upsert_item(predictions_container, prediction_doc)
+        logger.info("Wrote %d group predictions for matchday %s", len(predictions), matchday)
+
+        # Accuracy scoring against completed fixtures
+        finished_fixtures = [f for f in fixtures if f.get("status") == "FT"]
+        if finished_fixtures and predictions:
+            standings = await query_items(
+                fixtures_container,
+                "SELECT * FROM c WHERE c.status = 'FT'",
+            )
+            accuracy = compute_accuracy(predictions, standings)
+            score_doc: dict[str, Any] = {
+                "id": f"score-md{matchday}",
+                "matchday": matchday,
+                "evaluatedAt": now,
+                **accuracy,
+            }
+            await upsert_item(scores_container, score_doc)
+            logger.info(
+                "Accuracy for matchday %s: %s/%s",
+                matchday, accuracy["score"], accuracy["totalGroups"],
+            )
+    except Exception as e:
+        logger.error("Error generating predictions for matchday: %s", str(e), exc_info=True)
+        raise
