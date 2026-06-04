@@ -86,12 +86,29 @@ def _build_prompt(
 
     lines = [
         "You are a football analyst. Predict the FIFA World Cup 2026 group stage outcomes.",
+        "CRITICAL: You MUST predict for ALL groups A through L listed below.",
+        "CRITICAL: Do NOT invent groups or team assignments. Use ONLY the group assignments provided.",
         "For each group, predict: the winner, runner-up, confidence level (high/medium/low), reasoning, and the score of every upcoming fixture.",
         "Rate your confidence for each group and each predicted match score.",
+        "",
+        "REQUIRED GROUP ASSIGNMENTS (DO NOT CHANGE):",
+        "Group A: USA, Morocco, Portugal, Panama",
+        "Group B: Spain, Croatia, Japan, South Korea",
+        "Group C: Germany, Mexico, Belgium, Australia",
+        "Group D: Brazil, Argentina, France, England",
+        "Group E: Netherlands, Denmark, Senegal, Ecuador",
+        "Group F: Uruguay, Canada, Switzerland, Serbia",
+        "Group G: Italy, Tunisia, South Africa, Qatar",
+        "Group H: Colombia, Cameroon, Ghana, Poland",
+        "Group I: Iran, Wales, Costa Rica, Jamaica",
+        "Group J: Saudi Arabia, Peru, Bolivia, Curacao",
+        "Group K: Venezuela, Honduras, Chile, Cuba",
+        "Group L: Nigeria, Algeria, Egypt, Zimbabwe",
+        "",
         "Respond ONLY with valid JSON matching this schema exactly:",
         schema,
         "",
-        "GROUP DATA:",
+        "DETAILED GROUP DATA:",
     ]
 
     for letter in sorted(groups.keys()):
