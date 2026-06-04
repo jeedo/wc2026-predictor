@@ -134,13 +134,25 @@ stages:
             displayName: 'Install uv'
 
           - script: |
+              set -euo pipefail
               export PATH="$HOME/.cargo/bin:$PATH"
               cd functions
-              # Use uv sync to create venv from uv.lock, then copy to .python_packages
-              # uv.lock ensures deterministic, reproducible builds
+
+              # Use uv sync to create venv from uv.lock
               uv sync --no-dev
+
+              # Find the Python version in venv and copy site-packages
+              PYTHON_DIR=$(find .venv/lib -maxdepth 1 -type d -name "python*" | head -1)
+              if [ -z "$PYTHON_DIR" ]; then
+                echo "ERROR: No Python directory found in .venv/lib"
+                ls -la .venv/lib/
+                exit 1
+              fi
+
+              echo "Found Python directory: $PYTHON_DIR"
               mkdir -p .python_packages/lib/site-packages
-              cp -r .venv/lib/python*/site-packages/* .python_packages/lib/site-packages/
+              cp -rv "$PYTHON_DIR/site-packages/"* .python_packages/lib/site-packages/
+              echo "Dependencies copied successfully"
             displayName: 'Install dependencies with uv sync into .python_packages'
 
           - script: |
