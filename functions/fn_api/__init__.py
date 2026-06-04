@@ -14,12 +14,12 @@ from typing import Any
 import azure.functions as func
 import httpx
 from azure.cosmos import CosmosClient  # sync client — fn_api is synchronous
-from azure.storage.queue import QueueClient
 
 from shared.cosmos import query_items_sync as query_items
 from shared.usage_tracker import PROVIDER_LIMITS
 
 logger = logging.getLogger(__name__)
+logger.info("fn_api module loaded successfully")
 
 _FIXTURE_ROUTE = re.compile(r"/api/fixtures/(\d+)$")
 
@@ -43,7 +43,8 @@ def get_containers() -> tuple[Any, Any, Any, Any, Any]:
     )
 
 
-def get_queue_client() -> QueueClient:
+def get_queue_client():
+    from azure.storage.queue import QueueClient
     return QueueClient.from_connection_string(
         os.environ["AzureWebJobsStorage"],
         queue_name=os.environ.get("PREDICT_QUEUE_NAME", "predict-trigger"),
