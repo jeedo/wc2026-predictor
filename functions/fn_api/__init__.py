@@ -68,7 +68,7 @@ def _handle_groups(teams_container: Any) -> func.HttpResponse:
 def _handle_predictions(predictions_container: Any) -> func.HttpResponse:
     docs = query_items(
         predictions_container,
-        "SELECT * FROM c ORDER BY c.matchday DESC OFFSET 0 LIMIT 1",
+        "SELECT * FROM c WHERE c.id = 'predictions-all'",
     )
     if not docs:
         return _json_404("No predictions available")
@@ -92,8 +92,7 @@ def _handle_fixtures(
     try:
         prediction_docs = query_items(
             predictions_container,
-            "SELECT * FROM c WHERE c.id = @id",
-            parameters=[{"name": "@id", "value": f"prediction-md{matchday}"}],
+            "SELECT * FROM c WHERE c.id = 'predictions-all'",
         )
         if prediction_docs:
             pred_doc = prediction_docs[0]
@@ -388,14 +387,13 @@ def _handle_predictions_generate(
 
         now = datetime.now(timezone.utc).isoformat()
         prediction_doc = {
-            "id": f"prediction-md{matchday}",
-            "matchday": matchday,
+            "id": "predictions-all",
             "generatedAt": now,
             "groups": predictions,
         }
         predictions_container.upsert_item(prediction_doc)
 
-        logger.info("Generated and stored %d group predictions for matchday %s", len(predictions), matchday)
+        logger.info("Generated and stored %d group predictions", len(predictions))
 
         return _json_200({
             "status": "generated",

@@ -127,3 +127,39 @@ Run from the project root:
 | `renumber_tasks.py` | `python scripts/renumber_tasks.py` | Restore sequential numbering after adding/removing tasks |
 | `complete_task.py` | `python scripts/complete_task.py <N>` | Mark task N as complete |
 | `get_phase_tasks.py` | `python scripts/get_phase_tasks.py <phase>` | List tasks for a phase (by name or number) |
+
+---
+
+## Debugging & Monitoring
+
+**Query Application Insights Logs:**
+
+Use `debug/get_logs.py` to query logs from each function app:
+
+```bash
+# Get all data for fn_api in the last hour
+uv run debug/get_logs.py fn_api
+
+# Get all functions (default)
+uv run debug/get_logs.py
+
+# Look back 3 hours
+uv run debug/get_logs.py fn_api --hours 3
+
+# Get only requests (skip traces and exceptions)
+uv run debug/get_logs.py fn_api --requests-only
+
+# Get only exceptions
+uv run debug/get_logs.py fn_api --exceptions-only
+
+# Query with limit
+uv run debug/get_logs.py fn_predict --limit 50
+```
+
+**Available functions:** `fn_api`, `fn_predict`, `fn_ingest`, or `all`
+
+The script shows:
+- 📊 Recent HTTP requests with status codes and response times
+- 📝 Application trace logs at different severity levels
+- ❌ Exceptions and errors
+- ✅ Function app health status and uptime
