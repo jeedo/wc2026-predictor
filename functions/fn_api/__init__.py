@@ -256,8 +256,7 @@ def _handle_ingest(req: func.HttpRequest) -> func.HttpResponse:
 
 
 async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predictions_container: Any, scores_container: Any, usage_container: Any) -> dict:
-    """Run the ingest logic asynchronously."""
-    from azure.cosmos.aio import CosmosClient as AsyncCosmosClient
+    """Run the ingest logic asynchronously using sync Cosmos operations."""
     from fn_ingest import (
         _get_football_data_api_key,
         _build_team_doc,
@@ -265,7 +264,7 @@ async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predi
         _should_enqueue,
     )
     from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd
-    from shared.cosmos import upsert_item, query_items, read_item
+    from shared.cosmos import query_items_sync, read_item
     from shared.usage_tracker import record_call
 
     stats = {"teams_seeded": 0, "fixtures_upserted": 0}
@@ -278,23 +277,17 @@ async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predi
         logger.error("Failed to get football-data API key: %s", str(e), exc_info=True)
         raise
 
-    # Create async Cosmos client for async operations
-    async_cosmos = AsyncCosmosClient.from_connection_string(os.environ["CosmosDbConnectionString"])
-    async_db = async_cosmos.get_database_client(os.environ.get("COSMOS_DATABASE_NAME", "wc2026"))
-    async_teams = async_db.get_container_client("teams")
-    async_fixtures = async_db.get_container_client("fixtures")
-    async_usage = async_db.get_container_client("usage")
-
     async with httpx.AsyncClient() as http:
         # Seed teams if empty
         logger.info("Checking if teams need seeding...")
-        existing = await query_items(async_teams, "SELECT VALUE COUNT(1) FROM c")
+        existing = query_items_sync(teams_container, "SELECT VALUE COUNT(1) FROM c")
         if not existing or existing[0] == 0:
             logger.info("Teams container empty, fetching from API-Football...")
             raw_teams = await fetch_teams_fd(api, http)
-            await record_call(async_usage, "api-football")
+            logger.info("Fetched %d teams from API-Football", len(raw_teams))
             for raw in raw_teams:
-                await upsert_item(async_teams, _build_team_doc(raw))
+                doc = _build_team_doc(raw)
+                teams_container.upsert_item(doc)
             stats["teams_seeded"] = len(raw_teams)
             logger.info("Seeded %d teams", len(raw_teams))
         else:
@@ -305,7 +298,6 @@ async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predi
         for matchday in [1, 2, 3]:
             logger.info("Processing matchday %s", matchday)
             raw_fixtures = await fetch_matches_fd(api, http, matchday)
-            await record_call(async_usage, "api-football")
             logger.info("Fetched %d fixtures for matchday %s", len(raw_fixtures), matchday)
 
             for raw in raw_fixtures:
@@ -315,14 +307,18 @@ async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predi
 
                 # Determine previous status
                 try:
-                    prev = await read_item(async_fixtures, fixture_id, partition_key)
-                    prev_status = prev.get("status")
+                    prev = query_items_sync(
+                        fixtures_container,
+                        "SELECT * FROM c WHERE c.id = @id",
+                        parameters=[{"name": "@id", "value": fixture_id}]
+                    )
+                    prev_status = prev[0].get("status") if prev else None
                 except Exception:
                     prev_status = None
 
-                await upsert_item(async_fixtures, doc)
+                fixtures_container.upsert_item(doc)
                 stats["fixtures_upserted"] += 1
-                logger.info("Upserted fixture %s", doc["fixtureId"])
+                logger.info("Upserted fixture %s", doc.get("fixtureId", fixture_id))
 
     logger.info("Ingest complete: %s", stats)
     return stats
