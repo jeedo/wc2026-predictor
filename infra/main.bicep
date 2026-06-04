@@ -131,6 +131,19 @@ resource usageContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/cont
 }
 
 // ---------------------------------------------------------------------------
+// Application Insights
+// ---------------------------------------------------------------------------
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: 'appinsights-wc2026-${suffix}'
+  location: location
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    RetentionInDays: 30
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Key Vault
 // ---------------------------------------------------------------------------
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
@@ -245,6 +258,14 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
           name: 'SERPA_API_KEY'
           value: '@Microsoft.KeyVault(SecretUri=${keyVault.properties.vaultUri}secrets/serpa-api-key/)'
         }
+        {
+          name: 'APPINSIGHTS_INSTRUMENTATIONKEY'
+          value: appInsights.properties.InstrumentationKey
+        }
+        {
+          name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+          value: appInsights.properties.ConnectionString
+        }
       ]
     }
   }
@@ -280,3 +301,5 @@ output functionAppName string = functionApp.name
 output staticWebAppName string = staticWebApp.name
 output keyVaultUri string = keyVault.properties.vaultUri
 output cosmosDatabaseName string = cosmosDatabase.name
+output appInsightsInstrumentationKey string = appInsights.properties.InstrumentationKey
+output appInsightsName string = appInsights.name

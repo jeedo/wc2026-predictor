@@ -102,10 +102,14 @@ gh issue list
 - Manual deploys should only be used during local debugging/testing
 - Check pipeline status via Azure DevOps portal or by waiting for logs to appear in App Insights (~2-3 min)
 
-**Checking Deployment Status:**
-- Use App Insights to verify logs (traces, exceptions, requests) after deployment
-- Function app should log execution details if `APPINSIGHTS_INSTRUMENTATIONKEY` is set in app settings
-- If no logs appear, check that the instrumentation key is configured: `az functionapp config appsettings list`
+**Application Insights Logging:**
+- `APPINSIGHTS_INSTRUMENTATIONKEY` and `APPLICATIONINSIGHTS_CONNECTION_STRING` are automatically configured by Bicep
+- All function executions, exceptions, and traces are logged to App Insights
+- Check logs with: `az monitor app-insights query --app appinsights-wc2026 --analytics-query "traces | order by timestamp desc | limit 20"`
+- Query examples:
+  - Recent errors: `exceptions | where timestamp > ago(30m) | order by timestamp desc`
+  - Failed requests: `requests | where success == false | order by timestamp desc`
+  - Function execution logs: `traces | where operation_Name contains 'fn_api' | order by timestamp desc`
 
 ---
 

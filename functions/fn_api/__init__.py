@@ -261,13 +261,12 @@ async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predi
         _build_team_doc,
         _build_fixture_doc,
         _should_enqueue,
-        get_queue_client,
     )
     from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd
     from shared.cosmos import upsert_item, query_items, read_item
     from shared.usage_tracker import record_call
 
-    stats = {"teams_seeded": 0, "fixtures_upserted": 0, "predictions_enqueued": 0}
+    stats = {"teams_seeded": 0, "fixtures_upserted": 0}
 
     try:
         api_key = _get_football_data_api_key()
@@ -276,8 +275,6 @@ async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predi
     except Exception as e:
         logger.error("Failed to get football-data API key: %s", str(e), exc_info=True)
         raise
-
-    queue = get_queue_client()
 
     async with httpx.AsyncClient() as http:
         # Seed teams if empty
@@ -316,12 +313,7 @@ async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predi
 
                 await upsert_item(fixtures_container, doc)
                 stats["fixtures_upserted"] += 1
-
-                if _should_enqueue(prev_status, doc["status"]):
-                    message = json.dumps({"matchday": matchday, "fixtureId": doc["fixtureId"]})
-                    await queue.send_message(message)
-                    stats["predictions_enqueued"] += 1
-                    logger.info("Enqueued prediction for fixture %s", doc["fixtureId"])
+                logger.info("Upserted fixture %s", doc["fixtureId"])
 
     logger.info("Ingest complete: %s", stats)
     return stats
