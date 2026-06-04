@@ -324,6 +324,84 @@ async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predi
     return stats
 
 
+def _handle_predictions_generate(
+    teams_container: Any,
+    fixtures_container: Any,
+    predictions_container: Any,
+    usage_container: Any,
+    req: func.HttpRequest,
+) -> func.HttpResponse:
+    """Generate predictions on-demand via Claude."""
+    try:
+        body = req.get_json()
+        matchday = body.get("matchday", 1)
+    except ValueError:
+        matchday = 1
+
+    if not isinstance(matchday, int) or matchday < 1 or matchday > 3:
+        return func.HttpResponse(
+            body=json.dumps({"error": "matchday must be an integer between 1 and 3"}),
+            status_code=400,
+            mimetype="application/json",
+        )
+
+    logger.info("Generating predictions for matchday %s on-demand", matchday)
+
+    try:
+        # Fetch teams and fixtures
+        teams = query_items(teams_container, "SELECT * FROM c")
+        fixtures = query_items(fixtures_container, "SELECT * FROM c")
+
+        # Build prompt
+        from fn_predict import _build_prompt, _parse_claude_response
+        prompt = _build_prompt(teams=teams, fixtures=fixtures, news=None)
+
+        # Call Claude
+        import anthropic
+        client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        # Record usage
+        from shared.usage_tracker import record_call
+        record_call(usage_container, "anthropic",
+                   inputTokens=response.usage.input_tokens,
+                   outputTokens=response.usage.output_tokens)
+
+        # Parse and store predictions
+        raw_text = response.content[0].text
+        predictions = _parse_claude_response(raw_text)
+
+        now = datetime.now(timezone.utc).isoformat()
+        prediction_doc = {
+            "id": f"prediction-md{matchday}",
+            "matchday": matchday,
+            "generatedAt": now,
+            "groups": predictions,
+        }
+        predictions_container.upsert_item(prediction_doc)
+
+        logger.info("Generated and stored %d group predictions for matchday %s", len(predictions), matchday)
+
+        return _json_200({
+            "status": "generated",
+            "matchday": matchday,
+            "groups": len(predictions),
+            "message": "Predictions generated successfully"
+        })
+
+    except Exception as e:
+        logger.error("Error generating predictions: %s", str(e), exc_info=True)
+        return func.HttpResponse(
+            body=json.dumps({"error": str(e)}),
+            status_code=500,
+            mimetype="application/json",
+        )
+
+
 def _handle_predictions_trigger(
     queue_client: QueueClient, req: func.HttpRequest
 ) -> func.HttpResponse:
@@ -401,6 +479,15 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
         if route == "predictions" and req.method == "GET":
             return _handle_predictions(predictions_container)
+
+        if route == "predictions/generate" and req.method == "POST":
+            return _handle_predictions_generate(
+                teams_container,
+                fixtures_container,
+                predictions_container,
+                usage_container,
+                req,
+            )
 
         if route == "predictions/trigger" and req.method == "POST":
             queue_client = get_queue_client()
