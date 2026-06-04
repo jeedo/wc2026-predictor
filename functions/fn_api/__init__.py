@@ -395,7 +395,8 @@ def _handle_predictions_generate(
             "groups": len(predictions),
             "message": "Predictions generated successfully",
             "claudeResponseLength": len(raw_text),
-            "parsedGroups": len(predictions)
+            "parsedGroups": len(predictions),
+            "claudeResponseSample": raw_text[:300]  # First 300 chars for debugging
         })
 
     except Exception as e:
