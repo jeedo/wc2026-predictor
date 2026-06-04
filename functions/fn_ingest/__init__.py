@@ -16,7 +16,7 @@ from azure.keyvault.secrets import SecretClient
 from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd
 from shared.cosmos import upsert_item, query_items, read_item
 from shared.usage_tracker import record_call
-from shared.group_derivation import derive_groups_from_fixtures
+from shared.group_derivation import fetch_groups_from_standings
 
 logger = logging.getLogger(__name__)
 
@@ -152,18 +152,19 @@ async def main(mytimer: func.TimerRequest) -> None:
     usage_container = get_usage_container()
 
     async with httpx.AsyncClient() as http:
-        # Fetch all fixtures first to derive group assignments
+        # Fetch group assignments from standings endpoint
+        logger.info("Fetching group assignments from Football Data API...")
+        team_to_group = await fetch_groups_from_standings(api_key)
+        await record_call(usage_container, "api-football")
+        logger.info("Fetched %d group assignments from standings", len(team_to_group))
+
+        # Fetch all fixtures for matchdays 1-3
         logger.info("Fetching fixtures for matchdays 1-3 from 2026 World Cup...")
         all_fixtures = []
         for matchday in _MATCHDAYS:
             raw_fixtures = await fetch_matches_fd(api, http, matchday)
             await record_call(usage_container, "api-football")
             all_fixtures.extend(raw_fixtures)
-
-        # Derive groups from matchday 1 fixtures (where teams only play other teams in their group)
-        built_fixtures = [_build_fixture_doc(f) for f in all_fixtures]
-        team_to_group = derive_groups_from_fixtures(built_fixtures)
-        logger.info("Derived %d group assignments from fixtures", len(team_to_group))
 
         # Seed teams on first run (container empty)
         logger.info("Checking if teams need seeding...")
