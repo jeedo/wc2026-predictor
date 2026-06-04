@@ -281,6 +281,7 @@ async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predi
     from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd
     from shared.cosmos import query_items_sync, read_item
     from shared.usage_tracker import record_call
+    from shared.group_derivation import derive_groups_from_fixtures
 
     stats = {"teams_seeded": 0, "fixtures_upserted": 0}
 
@@ -293,6 +294,19 @@ async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predi
         raise
 
     async with httpx.AsyncClient() as http:
+        # Fetch all fixtures first to derive group assignments
+        logger.info("Fetching fixtures for matchdays 1-3...")
+        all_fixtures = []
+        for matchday in [1, 2, 3]:
+            raw_fixtures = await fetch_matches_fd(api, http, matchday)
+            logger.info("Fetched %d fixtures for matchday %s", len(raw_fixtures), matchday)
+            all_fixtures.extend(raw_fixtures)
+
+        # Derive groups from matchday 1 fixtures
+        built_fixtures = [_build_fixture_doc(f) for f in all_fixtures]
+        team_to_group = derive_groups_from_fixtures(built_fixtures)
+        logger.info("Derived %d group assignments from fixtures", len(team_to_group))
+
         # Seed teams if empty
         logger.info("Checking if teams need seeding...")
         existing = query_items_sync(teams_container, "SELECT VALUE COUNT(1) FROM c")
@@ -301,21 +315,22 @@ async def _run_ingest_async(teams_container: Any, fixtures_container: Any, predi
             raw_teams = await fetch_teams_fd(api, http)
             logger.info("Fetched %d teams from API-Football", len(raw_teams))
             for raw in raw_teams:
-                doc = _build_team_doc(raw)
+                team_name = raw.get("name", "Unknown")
+                team_group = team_to_group.get(team_name) or raw.get("group") or "Unknown"
+                doc = _build_team_doc(raw, group=team_group)
                 teams_container.upsert_item(doc)
             stats["teams_seeded"] = len(raw_teams)
             logger.info("Seeded %d teams", len(raw_teams))
         else:
             logger.info("Teams already seeded (%d teams)", existing[0] if existing else 0)
 
-        # Fetch and upsert fixtures
-        logger.info("Fetching fixtures for matchdays 1-3...")
+        # Upsert fixtures
+        logger.info("Upserting fixtures for matchdays 1-3...")
         for matchday in [1, 2, 3]:
-            logger.info("Processing matchday %s", matchday)
-            raw_fixtures = await fetch_matches_fd(api, http, matchday)
-            logger.info("Fetched %d fixtures for matchday %s", len(raw_fixtures), matchday)
+            matchday_fixtures = [f for f in all_fixtures if f.get("matchday") == matchday]
+            logger.info("Processing %d fixtures for matchday %s", len(matchday_fixtures), matchday)
 
-            for raw in raw_fixtures:
+            for raw in matchday_fixtures:
                 doc = _build_fixture_doc(raw)
                 fixture_id = doc["id"]
                 partition_key = doc["matchday"]

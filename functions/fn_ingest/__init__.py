@@ -16,6 +16,7 @@ from azure.keyvault.secrets import SecretClient
 from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd
 from shared.cosmos import upsert_item, query_items, read_item
 from shared.usage_tracker import record_call
+from shared.group_derivation import derive_groups_from_fixtures
 
 logger = logging.getLogger(__name__)
 
@@ -55,47 +56,6 @@ def _get_football_data_api_key() -> str:
 
 def _should_enqueue(old_status: str | None, new_status: str) -> bool:
     return new_status == "FT" and old_status != "FT"
-
-
-def _derive_groups_from_fixtures(fixtures: list[dict[str, Any]]) -> dict[str, str]:
-    """Derive group assignments from matchday 1 fixtures.
-
-    Teams that play each other in matchday 1 belong to the same group.
-    Returns dict mapping team name -> group letter (A-L).
-    """
-    # Get all matchday 1 fixtures
-    md1_fixtures = [f for f in fixtures if f.get("matchday") == 1]
-
-    team_to_group: dict[str, str] = {}
-    group_count = 0
-
-    for fixture in md1_fixtures:
-        home = fixture.get("homeTeam", "")
-        away = fixture.get("awayTeam", "")
-
-        if not home or not away:
-            continue
-
-        home_group = team_to_group.get(home)
-        away_group = team_to_group.get(away)
-
-        if home_group and away_group:
-            # Both already assigned - skip
-            continue
-        elif home_group:
-            # Assign away to home's group
-            team_to_group[away] = home_group
-        elif away_group:
-            # Assign home to away's group
-            team_to_group[home] = away_group
-        else:
-            # Both unassigned - create new group
-            group_letter = chr(ord('A') + group_count)
-            team_to_group[home] = group_letter
-            team_to_group[away] = group_letter
-            group_count += 1
-
-    return team_to_group
 
 
 def _build_fixture_doc(raw: dict[str, Any]) -> dict[str, Any]:
@@ -202,7 +162,7 @@ async def main(mytimer: func.TimerRequest) -> None:
 
         # Derive groups from matchday 1 fixtures (where teams only play other teams in their group)
         built_fixtures = [_build_fixture_doc(f) for f in all_fixtures]
-        team_to_group = _derive_groups_from_fixtures(built_fixtures)
+        team_to_group = derive_groups_from_fixtures(built_fixtures)
         logger.info("Derived %d group assignments from fixtures", len(team_to_group))
 
         # Seed teams on first run (container empty)
