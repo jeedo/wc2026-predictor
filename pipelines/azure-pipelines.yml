@@ -48,11 +48,9 @@ stages:
               categories: 'IaC,code,dependencies'
 
           # Publish SARIF findings as pipeline artifact for review
-          # continueOnError: true because the output dir only exists when MSDO exits clean
           - task: PublishBuildArtifacts@1
             displayName: 'Publish SARIF results'
             condition: always()
-            continueOnError: true
             inputs:
               PathtoPublish: '$(Agent.TempDirectory)/.msdo/result'
               ArtifactName: 'security-scan-results'

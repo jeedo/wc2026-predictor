@@ -38,7 +38,6 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
     accessTier: 'Hot'
     allowBlobPublicAccess: false
     minimumTlsVersion: 'TLS1_2'
-    supportsHttpsTrafficOnly: true
   }
 }
 
@@ -212,10 +211,8 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
   identity: { type: 'SystemAssigned' }
   properties: {
     serverFarmId: hostingPlan.id
-    httpsOnly: true
     siteConfig: {
       linuxFxVersion: 'PYTHON|3.12'
-      http20Enabled: true
       appSettings: [
         {
           name: 'AzureWebJobsStorage'
@@ -275,7 +272,7 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
 }
 
 // Grant Function App managed identity the Key Vault Secrets User role
-var kvSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6' // gitleaks:allow — Azure built-in role GUID, not a secret
+var kvSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
 
 resource kvRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: keyVault
