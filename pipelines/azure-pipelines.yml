@@ -46,7 +46,6 @@ stages:
             continueOnError: true
             inputs:
               categories: 'IaC,code,dependencies'
-              break: false
 
           # Publish SARIF findings as pipeline artifact for review
           # continueOnError: true because the output dir only exists when MSDO exits clean
