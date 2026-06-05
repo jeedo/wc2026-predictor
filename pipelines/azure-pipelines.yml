@@ -150,7 +150,7 @@ stages:
               appType: 'functionAppLinux'
               appName: $(functionAppName)
               package: functions.zip
-              deploymentMethod: 'zipDeploy'
+              deploymentMethod: 'auto'
 
   # ---------------------------------------------------------------------------
   # Stage 3: Frontend
