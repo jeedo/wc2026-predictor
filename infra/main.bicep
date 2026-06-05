@@ -272,7 +272,7 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
 }
 
 // Grant Function App managed identity the Key Vault Secrets User role
-var kvSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
+var kvSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6' // gitleaks:allow — Azure built-in role GUID, not a secret
 
 resource kvRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: keyVault
