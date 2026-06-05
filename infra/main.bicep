@@ -38,6 +38,7 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
     accessTier: 'Hot'
     allowBlobPublicAccess: false
     minimumTlsVersion: 'TLS1_2'
+    supportsHttpsTrafficOnly: true
   }
 }
 
@@ -211,8 +212,10 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
   identity: { type: 'SystemAssigned' }
   properties: {
     serverFarmId: hostingPlan.id
+    httpsOnly: true
     siteConfig: {
       linuxFxVersion: 'PYTHON|3.12'
+      http20Enabled: true
       appSettings: [
         {
           name: 'AzureWebJobsStorage'
