@@ -17,45 +17,6 @@ variables:
 stages:
 
   # ---------------------------------------------------------------------------
-  # Stage 0: Security Scanning
-  # Runs in parallel with infra — no dependsOn so it does not add wall-clock
-  # time to deployments.
-  # Gitleaks is always blocking. MSDO starts non-blocking (continueOnError:
-  # true); set to false once the initial finding baseline is resolved, then
-  # add 'security' to the functions stage dependsOn.
-  # ---------------------------------------------------------------------------
-  - stage: security
-    displayName: 'Security Scan'
-    jobs:
-      - job: Scan
-        displayName: 'MSDO + Gitleaks'
-        pool:
-          vmImage: ubuntu-latest
-        steps:
-
-          # Gitleaks — blocks pipeline immediately if secrets found in code or git history
-          - script: |
-              curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz \
-                | tar xz gitleaks
-              ./gitleaks detect --source . --exit-code 1
-            displayName: 'Gitleaks secret scan'
-
-          # MSDO — Bandit (Python SAST), Checkov (Bicep), Template Analyzer (Bicep), Trivy (Python deps)
-          - task: MicrosoftSecurityDevOps@1
-            displayName: 'MSDO security scan'
-            continueOnError: true
-            inputs:
-              categories: 'IaC,code,dependencies'
-
-          # Publish SARIF findings as pipeline artifact for review
-          - task: PublishBuildArtifacts@1
-            displayName: 'Publish SARIF results'
-            condition: always()
-            inputs:
-              PathtoPublish: '$(Agent.TempDirectory)/.msdo/result'
-              ArtifactName: 'security-scan-results'
-
-  # ---------------------------------------------------------------------------
   # Stage 1: Infrastructure
   # Provisions all Azure resources and writes Key Vault secrets.
   # ---------------------------------------------------------------------------

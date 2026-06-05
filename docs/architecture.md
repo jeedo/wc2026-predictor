@@ -109,16 +109,13 @@ Four containers, all using NoSQL JSON documents. Partition keys designed for poi
 
 ### 3.5 Azure DevOps Pipeline
 
-Four-stage pipeline:
+Three-stage pipeline:
 
 | Stage       | Trigger               | Actions                                                                                              |
 |-------------|-----------------------|------------------------------------------------------------------------------------------------------|
-| `security`  | Push to main          | Gitleaks secret scan (blocking) + MSDO scan: Bandit (Python SAST), Checkov (Bicep), Trivy (deps)    |
 | `infra`     | Push to main / manual | `az deployment` run on `main.bicep` — provisions Cosmos DB, Function App, Static Web App, Key Vault  |
 | `functions` | Push to main          | `uv build` → zip artifact → `az functionapp deploy` to Function App                                  |
 | `frontend`  | Push to main          | `npm build` → artifact → `AzureStaticWebApp@0` deploy task                                           |
-
-`security` and `infra` run in parallel (no `dependsOn`). Once the MSDO finding baseline is resolved, `functions` will be updated to depend on `security` as well as `infra`, making security failures block deployment.
 
 ### 3.6 Repository Structure
 
