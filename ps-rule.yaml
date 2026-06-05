@@ -1,13 +1,14 @@
-# PSRule for Azure — suppression configuration
-# Rules suppressed here are non-fixable on Consumption Plan (no VNet integration available).
-# See .gdnsuppress for justifications.
-suppression:
-  # Storage account: network firewall rules require VNet integration, not available on
-  # Consumption Plan — would break the function app's AzureWebJobsStorage binding.
-  Azure.Storage.Firewall:
-    - storageAccount
-
-  # Key Vault: network ACLs would block the pipeline's provisioning steps and MSDO scan
-  # agent from accessing secrets; personal project on free tier without VNet.
-  Azure.KeyVault.Firewall:
-    - keyVault
+# PSRule for Azure — rule exclusions for non-fixable findings.
+# Both rules require VNet-based network ACLs which are unavailable on the Consumption Plan.
+# See .gdnsuppress for detailed justifications.
+#
+# NOTE: 'suppression' (by resource name) did not work because resource names use
+# uniqueString() at deploy time and cannot be matched statically. 'rule.exclude'
+# prevents the rule from running at all, which is equivalent for a single-resource template.
+rule:
+  exclude:
+    # Storage account firewall: network ACLs would break AzureWebJobsStorage binding
+    # on Consumption Plan (no VNet integration available).
+    - 'Azure.Storage.Firewall'
+    # Key Vault firewall: network ACLs would block pipeline provisioning and MSDO agent.
+    - 'Azure.KeyVault.Firewall'
