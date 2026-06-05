@@ -45,6 +45,19 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
     allowBlobPublicAccess: false
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
+    networkAcls: {
+      defaultAction: 'Deny'
+      bypass: 'AzureServices,Logging,Metrics'
+      ipRules: [for ip in allowedAdminCidr: { value: ip }]
+      // resourceAccessRules lets the Consumption Plan function app reach storage
+      // via its managed identity without needing VNet integration.
+      resourceAccessRules: [
+        {
+          tenantId: subscription().tenantId
+          resourceId: resourceId('Microsoft.Web/sites', 'func-wc2026-${suffix}')
+        }
+      ]
+    }
   }
 }
 
@@ -232,8 +245,10 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
       minTlsVersion: '1.2'
       appSettings: [
         {
-          name: 'AzureWebJobsStorage'
-          value: 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};AccountKey=${storageAccount.listKeys().keys[0].value};EndpointSuffix=core.windows.net'
+          // Managed-identity connection — no storage key exposed.
+          // Requires Storage Blob Data Owner + Queue/Table Data Contributor roles below.
+          name: 'AzureWebJobsStorage__accountName'
+          value: storageAccount.name
         }
         {
           name: 'FUNCTIONS_EXTENSION_VERSION'
@@ -296,6 +311,43 @@ resource kvRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' =
   name: guid(keyVault.id, functionApp.id, kvSecretsUserRoleId)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', kvSecretsUserRoleId)
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Grant Function App managed identity storage roles required for AzureWebJobsStorage__accountName
+// (managed-identity connection replaces the key-based connection string).
+// Role GUIDs are Azure built-in roles — public well-known identifiers, not secrets. gitleaks:allow
+var storageBlobOwnerRoleId      = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe' // Storage Blob Data Owner
+var storageQueueContribRoleId   = '974c5e8b-45b9-4653-ba55-5f855dd0fb88' // Storage Queue Data Contributor
+var storageTableContribRoleId   = '0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3' // Storage Table Data Contributor
+
+resource storageBlobRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: storageAccount
+  name: guid(storageAccount.id, functionApp.id, storageBlobOwnerRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobOwnerRoleId)
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource storageQueueRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: storageAccount
+  name: guid(storageAccount.id, functionApp.id, storageQueueContribRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageQueueContribRoleId)
+    principalId: functionApp.identity.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource storageTableRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: storageAccount
+  name: guid(storageAccount.id, functionApp.id, storageTableContribRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageTableContribRoleId)
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }

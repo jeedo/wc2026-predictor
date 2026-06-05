@@ -40,23 +40,12 @@ stages:
               ./gitleaks detect --source . --exit-code 1
             displayName: 'Gitleaks secret scan'
 
-          # MSDO blocking scan — Bandit (Python SAST), Checkov (Bicep), Trivy (Python deps)
-          # High-severity findings here fail the build.
+          # MSDO — Bandit (Python SAST), Checkov (Bicep), TemplateAnalyzer (Bicep), Trivy (Python deps)
           - task: MicrosoftSecurityDevOps@1
-            displayName: 'MSDO blocking scan (Bandit, Checkov, Trivy)'
-            inputs:
-              tools: 'bandit,checkov,trivy'
-
-          # MSDO advisory scan — TemplateAnalyzer only, non-blocking.
-          # AZR-000202 (Storage.Firewall) cannot be satisfied on Consumption Plan (no VNet).
-          # TemplateAnalyzer rule suppression is an open upstream issue:
-          # https://github.com/Azure/template-analyzer/issues/367
-          - task: MicrosoftSecurityDevOps@1
-            displayName: 'MSDO advisory scan (TemplateAnalyzer)'
+            displayName: 'MSDO security scan'
             continueOnError: true
             inputs:
-              tools: 'templateanalyzer'
-              break: false
+              categories: 'IaC,code,dependencies'
 
           # Publish SARIF findings as pipeline artifact for review
           # continueOnError: true because the output dir only exists when MSDO exits clean
