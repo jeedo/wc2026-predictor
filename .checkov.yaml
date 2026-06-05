@@ -1,0 +1,5 @@
+skip-check:
+  # Key Vault secret expiry dates: personal project, secrets are manually rotated
+  - CKV_AZURE_41
+  # Key Vault purge protection: enabling it would prevent cleanup after the tournament ends
+  - CKV_AZURE_189
