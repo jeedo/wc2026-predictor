@@ -26,12 +26,6 @@ param footballDataKey string
 @secure()
 param serpaKey string
 
-@description('Allowed admin IP addresses for Key Vault firewall (CIDR notation). Update when your IP changes.')
-param allowedAdminCidr array = [
-  '31.40.213.83'   // PC
-  '83.185.47.224'  // Phone
-]
-
 // ---------------------------------------------------------------------------
 // Storage Account (required by Azure Functions)
 // ---------------------------------------------------------------------------
@@ -168,11 +162,11 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: true
     softDeleteRetentionInDays: 7
     enableSoftDelete: true
-    networkAcls: {
-      defaultAction: 'Deny'
-      bypass: 'AzureServices'  // ARM deployments and managed-identity access pass through
-      ipRules: [for ip in allowedAdminCidr: { value: ip }]
-    }
+    // Key Vault firewall cannot be restricted for Consumption Plan function apps:
+    // - bypass: 'AzureServices' does not cover Functions managed identity on shared Consumption Plan infra
+    // - Restricting access breaks Key Vault reference resolution in app settings
+    // - VNet integration (and private endpoints) require Premium Plan
+    // AZR-000355 remains advisory-only; same constraint as AZR-000202 (storage firewall).
   }
 }
 
