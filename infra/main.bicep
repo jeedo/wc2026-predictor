@@ -64,6 +64,7 @@ resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-02-15-preview
     databaseAccountOfferType: 'Standard'
     consistencyPolicy: { defaultConsistencyLevel: 'Session' }
     locations: [{ locationName: location, failoverPriority: 0 }]
+    disableKeyBasedMetadataWriteAccess: true
   }
 }
 
@@ -216,6 +217,8 @@ resource functionApp 'Microsoft.Web/sites@2023-01-01' = {
     siteConfig: {
       linuxFxVersion: 'PYTHON|3.12'
       http20Enabled: true
+      ftpsState: 'Disabled'
+      minTlsVersion: '1.2'
       appSettings: [
         {
           name: 'AzureWebJobsStorage'
