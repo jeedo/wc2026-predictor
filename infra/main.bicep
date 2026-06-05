@@ -26,6 +26,12 @@ param footballDataKey string
 @secure()
 param serpaKey string
 
+@description('Allowed admin IP addresses for Key Vault firewall (CIDR notation). Update when your IP changes.')
+param allowedAdminCidr array = [
+  '31.40.213.83/32'   // PC
+  '83.185.47.224/32'  // Phone
+]
+
 // ---------------------------------------------------------------------------
 // Storage Account (required by Azure Functions)
 // ---------------------------------------------------------------------------
@@ -157,6 +163,11 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: true
     softDeleteRetentionInDays: 7
     enableSoftDelete: true
+    networkAcls: {
+      defaultAction: 'Deny'
+      bypass: 'AzureServices'  // ARM deployments and managed-identity access pass through
+      ipRules: [for ip in allowedAdminCidr: { value: ip }]
+    }
   }
 }
 

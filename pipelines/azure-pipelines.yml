@@ -40,12 +40,23 @@ stages:
               ./gitleaks detect --source . --exit-code 1
             displayName: 'Gitleaks secret scan'
 
-          # MSDO — Bandit (Python SAST), Checkov (Bicep), Template Analyzer (Bicep), Trivy (Python deps)
+          # MSDO blocking scan — Bandit (Python SAST), Checkov (Bicep), Trivy (Python deps)
+          # High-severity findings here fail the build.
           - task: MicrosoftSecurityDevOps@1
-            displayName: 'MSDO security scan'
+            displayName: 'MSDO blocking scan (Bandit, Checkov, Trivy)'
+            inputs:
+              tools: 'bandit,checkov,trivy'
+
+          # MSDO advisory scan — TemplateAnalyzer only, non-blocking.
+          # AZR-000202 (Storage.Firewall) cannot be satisfied on Consumption Plan (no VNet).
+          # TemplateAnalyzer rule suppression is an open upstream issue:
+          # https://github.com/Azure/template-analyzer/issues/367
+          - task: MicrosoftSecurityDevOps@1
+            displayName: 'MSDO advisory scan (TemplateAnalyzer)'
             continueOnError: true
             inputs:
-              categories: 'IaC,code,dependencies'
+              tools: 'templateanalyzer'
+              break: false
 
           # Publish SARIF findings as pipeline artifact for review
           # continueOnError: true because the output dir only exists when MSDO exits clean
@@ -65,7 +76,7 @@ stages:
     displayName: 'Deploy Infrastructure'
     jobs:
       - job: BicepDeploy
-        displayName: 'Bicep + Key Vault secrets'
+        displayName: 'Bicep deploy'
         pool:
           vmImage: ubuntu-latest
         steps:
@@ -95,58 +106,8 @@ stages:
                 echo "##vso[task.setvariable variable=staticWebAppName;isOutput=true]$(echo $OUTPUT | jq -r .staticWebAppName.value)"
                 echo "##vso[task.setvariable variable=keyVaultUri;isOutput=true]$(echo $OUTPUT | jq -r .keyVaultUri.value)"
 
-          - task: AzureCLI@2
-            displayName: 'Provision Key Vault secrets'
-            inputs:
-              azureSubscription: $(azureSubscription)
-              scriptType: bash
-              scriptLocation: inlineScript
-              inlineScript: |
-                set -euo pipefail
-                KV_NAME=$(az keyvault list \
-                  --resource-group $(resourceGroup) \
-                  --query "[0].name" --output tsv)
-
-                # apisports-api-key
-                az keyvault secret set \
-                  --vault-name "$KV_NAME" \
-                  --name apisports-api-key \
-                  --value "$(APISPORTS_API_KEY)" > /dev/null
-
-                # anthropic-api-key
-                az keyvault secret set \
-                  --vault-name "$KV_NAME" \
-                  --name anthropic-api-key \
-                  --value "$(ANTHROPIC_API_KEY)" > /dev/null
-
-                # football-data-api-key
-                az keyvault secret set \
-                  --vault-name "$KV_NAME" \
-                  --name football-data-api-key \
-                  --value "$(FOOTBALL_DATA_API_KEY)" > /dev/null
-
-                # serpa-api-key
-                az keyvault secret set \
-                  --vault-name "$KV_NAME" \
-                  --name serpa-api-key \
-                  --value "$(SERPA_API_KEY)" > /dev/null
-
-                # cosmos-connection-string (pulled from Cosmos account)
-                COSMOS_NAME=$(az cosmosdb list \
-                  --resource-group $(resourceGroup) \
-                  --query "[0].name" --output tsv)
-                COSMOS_CONN=$(az cosmosdb keys list \
-                  --name "$COSMOS_NAME" \
-                  --resource-group $(resourceGroup) \
-                  --type connection-strings \
-                  --query "connectionStrings[0].connectionString" \
-                  --output tsv)
-                az keyvault secret set \
-                  --vault-name "$KV_NAME" \
-                  --name cosmos-connection-string \
-                  --value "$COSMOS_CONN" > /dev/null
-
-                echo "Key Vault secrets provisioned: apisports-api-key, anthropic-api-key, cosmos-connection-string"
+          # Key Vault secrets are deployed by main.bicep (secretApiSports, secretAnthropic,
+          # secretFootballData, secretSerpa, secretCosmos). No separate provisioning step needed.
 
   # ---------------------------------------------------------------------------
   # Stage 2: Functions
