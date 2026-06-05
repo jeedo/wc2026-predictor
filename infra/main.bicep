@@ -28,8 +28,8 @@ param serpaKey string
 
 @description('Allowed admin IP addresses for Key Vault firewall (CIDR notation). Update when your IP changes.')
 param allowedAdminCidr array = [
-  '31.40.213.83/32'   // PC
-  '83.185.47.224/32'  // Phone
+  '31.40.213.83'   // PC
+  '83.185.47.224'  // Phone
 ]
 
 // ---------------------------------------------------------------------------
@@ -45,19 +45,11 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' = {
     allowBlobPublicAccess: false
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
-    networkAcls: {
-      defaultAction: 'Deny'
-      bypass: 'AzureServices,Logging,Metrics'
-      ipRules: [for ip in allowedAdminCidr: { value: ip }]
-      // resourceAccessRules lets the Consumption Plan function app reach storage
-      // via its managed identity without needing VNet integration.
-      resourceAccessRules: [
-        {
-          tenantId: subscription().tenantId
-          resourceId: resourceId('Microsoft.Web/sites', 'func-wc2026-${suffix}')
-        }
-      ]
-    }
+    // Storage firewall cannot be restricted for Consumption Plan function apps:
+    // - resourceAccessRules does not support Microsoft.Web/sites
+    // - AzureServices bypass does not cover Functions Consumption Plan
+    // - VNet integration requires Premium Plan
+    // AZR-000202 remains advisory-only; see TemplateAnalyzer issue #367.
   }
 }
 

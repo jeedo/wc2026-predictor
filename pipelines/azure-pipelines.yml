@@ -40,12 +40,23 @@ stages:
               ./gitleaks detect --source . --exit-code 1
             displayName: 'Gitleaks secret scan'
 
-          # MSDO — Bandit (Python SAST), Checkov (Bicep), TemplateAnalyzer (Bicep), Trivy (Python deps)
+          # MSDO blocking scan — Bandit (Python SAST), Checkov (Bicep), Trivy (Python deps)
           - task: MicrosoftSecurityDevOps@1
-            displayName: 'MSDO security scan'
+            displayName: 'MSDO blocking scan (Bandit, Checkov, Trivy)'
+            inputs:
+              tools: 'bandit,checkov,trivy'
+
+          # MSDO advisory scan — TemplateAnalyzer only, non-blocking.
+          # AZR-000202 (Storage.Firewall) cannot be fixed on Consumption Plan:
+          # resourceAccessRules does not support Microsoft.Web/sites and
+          # AzureServices bypass does not cover Functions. Requires Premium + VNet.
+          # Upstream suppression tracking: github.com/Azure/template-analyzer/issues/367
+          - task: MicrosoftSecurityDevOps@1
+            displayName: 'MSDO advisory scan (TemplateAnalyzer)'
             continueOnError: true
             inputs:
-              categories: 'IaC,code,dependencies'
+              tools: 'templateanalyzer'
+              break: false
 
           # Publish SARIF findings as pipeline artifact for review
           # continueOnError: true because the output dir only exists when MSDO exits clean
