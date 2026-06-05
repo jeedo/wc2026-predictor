@@ -4,13 +4,7 @@ title = "wc2026-predictor gitleaks config"
   description = "Suppress known false positives"
   regexes = [
     # Azure built-in RBAC role definition GUIDs are public well-known identifiers, not secrets.
-    # See: https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles
-    # Key Vault Secrets User:
+    # Key Vault Secrets User: 4633458b-17de-408a-b874-0445c86b69e6
+    # See: https://learn.microsoft.com/en-us/azure/key-vault/general/rbac-guide
     '''4633458b-17de-408a-b874-0445c86b69e6''',
-    # Storage Blob Data Owner:
-    '''ba92f5b4-2d11-453d-a403-e96b0029c9fe''',
-    # Storage Queue Data Contributor:
-    '''974c5e8b-45b9-4653-ba55-5f855dd0fb88''',
-    # Storage Table Data Contributor:
-    '''0a9a7e1f-b9d0-4cc4-a60d-0319b160aaa3''',
   ]
