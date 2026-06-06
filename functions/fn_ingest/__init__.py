@@ -10,6 +10,7 @@ import azure.functions as func
 import httpx
 from azure.cosmos.aio import CosmosClient
 from azure.storage.queue.aio import QueueClient
+from azure.storage.queue import BinaryBase64EncodePolicy
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 
@@ -121,6 +122,7 @@ def get_queue_client() -> QueueClient:
     return QueueClient.from_connection_string(
         os.environ["AzureWebJobsStorage"],
         queue_name=os.environ.get("PREDICT_QUEUE_NAME", "predict-trigger"),
+        message_encode_policy=BinaryBase64EncodePolicy(),
     )
 
 
