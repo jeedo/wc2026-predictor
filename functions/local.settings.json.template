@@ -6,6 +6,9 @@
     "CosmosDbConnectionString": "AccountEndpoint=https://localhost:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMzcPs2/GR5CZDCG==;",
     "APISPORTS_API_KEY": "<your-api-sports-key-here>",
     "ANTHROPIC_API_KEY": "<your-anthropic-api-key-here>",
+    "FOOTBALL_DATA_API_KEY": "<your-football-data-api-key-here>",
+    "SERPA_API_KEY": "<your-serper-api-key-here>",
+    "SERPA_MAX_RESULTS": "3",
     "PREDICT_QUEUE_NAME": "predict-trigger",
     "COSMOS_DATABASE_NAME": "wc2026"
   }

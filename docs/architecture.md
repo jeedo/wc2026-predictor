@@ -74,7 +74,7 @@ Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
   2. When the `POST /api/predictions/trigger` HTTP endpoint is called (on-demand, before tournament starts)
 - Reads current `fixtures` and `teams` data from Cosmos DB
 - Constructs a structured prompt with group standings, team form, and FIFA rankings
-- If `SERPA_API_KEY` is set, fetches recent news for each team via Serper.dev before calling Claude, enriching the prompt with up-to-date information
+- If `SERPA_API_KEY` is set, fetches recent news for all teams **in parallel** via `asyncio.gather()` using Serper.dev, enriching the Claude prompt with up-to-date injury/form/squad information; results are cached in the `news` Cosmos container for 12 hours (configurable via `SERPA_MAX_RESULTS`, default 3) to avoid redundant API calls within the same matchday
 - Calls Claude API (`claude-haiku-4-5`) requesting JSON output: group winner, runner-up, confidence level, reasoning per group, and per-match predictions with confidence
 - Writes prediction documents to the `predictions` container, versioned by matchday
 - Idempotent: if multiple messages arrive for the same matchday (e.g. two matches finish in the same 6h window), the latest run overwrites the previous prediction document
@@ -90,7 +90,7 @@ Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
 
 ### 3.3 Cosmos DB Schema
 
-Four containers, all using NoSQL JSON documents. Partition keys designed for point reads.
+Five containers, all using NoSQL JSON documents. Partition keys designed for point reads.
 
 | Container     | Partition Key | Sample Document Fields                                                                         |
 |---------------|---------------|------------------------------------------------------------------------------------------------|
@@ -98,6 +98,7 @@ Four containers, all using NoSQL JSON documents. Partition keys designed for poi
 | `fixtures`    | `/matchday`   | `fixtureId`, `matchday`, `homeTeam`, `awayTeam`, `kickoff`, `homeScore`, `awayScore`, `status` |
 | `predictions` | `/matchday`   | `predictionId`, `matchday`, `generatedAt`, `groups[{group, winner, runnerUp, reasoning}]`      |
 | `scores`      | `/matchday`   | `scoreId`, `matchday`, `evaluatedAt`, `score`, `totalGroups`, `groups[{group, correct, predictedWinner, actualWinner, predictedRunnerUp, actualRunnerUp}]` |
+| `news`        | `/teamName`   | `id` (`news-{team}-{date}`), `teamName`, `date`, `snippets[]`, `ttl` (43200s / 12h)            |
 
 ### 3.4 React Frontend
 

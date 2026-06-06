@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from fn_predict import main as predict_main, _build_prompt, _parse_claude_response
+from fn_predict import _main_async, _build_prompt, _parse_claude_response, _fetch_news_parallel
 
 
 def _async_iter(items):
@@ -69,14 +69,12 @@ def test_build_prompt_includes_upcoming_fixtures():
     prompt = _build_prompt(teams=teams, fixtures=upcoming)
     assert "Germany" in prompt
     assert "Mexico" in prompt
-    # Should mention upcoming matches so Claude can predict them
     assert "UPCOMING" in prompt.upper() or "SCHEDULED" in prompt.upper() or "FIXTURE" in prompt.upper()
 
 
 def test_build_prompt_schema_includes_matches():
     teams = [_make_team("A", "Germany"), _make_team("A", "Mexico")]
     prompt = _build_prompt(teams=teams, fixtures=[])
-    # Prompt schema must instruct Claude to return match-level predictions
     assert "matches" in prompt
 
 
@@ -161,8 +159,24 @@ def test_parse_response_preserves_matches():
 
 
 # ---------------------------------------------------------------------------
-# main — idempotent write
+# Helpers for integration tests
 # ---------------------------------------------------------------------------
+
+CLAUDE_PREDICTIONS = json.dumps({
+    "predictions": [
+        {"group": "A", "winner": "Germany", "runnerUp": "Mexico", "reasoning": "..."}
+    ]
+})
+
+
+def _make_claude_mock():
+    mock_response = MagicMock()
+    mock_response.usage = MagicMock(input_tokens=100, output_tokens=50)
+    mock_response.content = [MagicMock(text=CLAUDE_PREDICTIONS)]
+    mock_claude = MagicMock()
+    mock_claude.beta.messages.parse = AsyncMock(return_value=mock_response)
+    return mock_claude, mock_response
+
 
 @pytest.fixture
 def queue_msg():
@@ -171,12 +185,9 @@ def queue_msg():
     return msg
 
 
-CLAUDE_PREDICTIONS = json.dumps({
-    "predictions": [
-        {"group": "A", "winner": "Germany", "runnerUp": "Mexico", "reasoning": "..."}
-    ]
-})
-
+# ---------------------------------------------------------------------------
+# _main_async — integration tests
+# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_predict_writes_prediction_doc(queue_msg):
@@ -189,18 +200,16 @@ async def test_predict_writes_prediction_doc(queue_msg):
     mock_predictions_container = MagicMock()
     mock_predictions_container.upsert_item = AsyncMock()
 
-    mock_claude = MagicMock()
-    mock_msg = MagicMock()
-    mock_msg.content = [MagicMock(text=CLAUDE_PREDICTIONS)]
-    mock_claude.messages.create = AsyncMock(return_value=mock_msg)
+    mock_claude, _ = _make_claude_mock()
 
     with (
         patch("fn_predict.get_containers", return_value=(
             mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
         )),
+        patch("fn_predict.get_news_container", return_value=None),
         patch("fn_predict.get_anthropic_client", return_value=mock_claude),
     ):
-        await predict_main(queue_msg)
+        await _main_async(queue_msg)
 
     mock_predictions_container.upsert_item.assert_called_once()
     doc = mock_predictions_container.upsert_item.call_args[1]["body"]
@@ -219,24 +228,21 @@ async def test_predict_fetches_news_when_serpa_key_set(queue_msg):
     mock_predictions_container = MagicMock()
     mock_predictions_container.upsert_item = AsyncMock()
 
-    mock_claude = MagicMock()
-    mock_msg = MagicMock()
-    mock_msg.content = [MagicMock(text=CLAUDE_PREDICTIONS)]
-    mock_claude.messages.create = AsyncMock(return_value=mock_msg)
+    mock_claude, _ = _make_claude_mock()
 
     with (
         patch("fn_predict.get_containers", return_value=(
             mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
         )),
+        patch("fn_predict.get_news_container", return_value=None),
         patch("fn_predict.get_anthropic_client", return_value=mock_claude),
         patch("fn_predict.search_team_news", new=AsyncMock(return_value=["Germany news headline"])) as mock_search,
         patch.dict(os.environ, {"SERPA_API_KEY": "test-serpa-key"}),
     ):
-        await predict_main(queue_msg)
+        await _main_async(queue_msg)
 
     mock_search.assert_called()
-    # Prompt sent to Claude should include the news headline
-    prompt_sent = mock_claude.messages.create.call_args[1]["messages"][0]["content"]
+    prompt_sent = mock_claude.beta.messages.parse.call_args[1]["messages"][0]["content"]
     assert "Germany news headline" in prompt_sent
 
 
@@ -251,21 +257,19 @@ async def test_predict_skips_news_when_no_serpa_key(queue_msg):
     mock_predictions_container = MagicMock()
     mock_predictions_container.upsert_item = AsyncMock()
 
-    mock_claude = MagicMock()
-    mock_msg = MagicMock()
-    mock_msg.content = [MagicMock(text=CLAUDE_PREDICTIONS)]
-    mock_claude.messages.create = AsyncMock(return_value=mock_msg)
+    mock_claude, _ = _make_claude_mock()
 
     env_without_serpa = {k: v for k, v in os.environ.items() if k != "SERPA_API_KEY"}
     with (
         patch("fn_predict.get_containers", return_value=(
             mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
         )),
+        patch("fn_predict.get_news_container", return_value=None),
         patch("fn_predict.get_anthropic_client", return_value=mock_claude),
         patch("fn_predict.search_team_news", new=AsyncMock()) as mock_search,
         patch.dict(os.environ, env_without_serpa, clear=True),
     ):
-        await predict_main(queue_msg)
+        await _main_async(queue_msg)
 
     mock_search.assert_not_called()
 
@@ -282,21 +286,81 @@ async def test_predict_overwrites_on_second_call(queue_msg):
     mock_predictions_container = MagicMock()
     mock_predictions_container.upsert_item = AsyncMock()
 
-    mock_claude = MagicMock()
-    mock_msg = MagicMock()
-    mock_msg.content = [MagicMock(text=CLAUDE_PREDICTIONS)]
-    mock_claude.messages.create = AsyncMock(return_value=mock_msg)
+    mock_claude, _ = _make_claude_mock()
 
     with (
         patch("fn_predict.get_containers", return_value=(
             mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
         )),
+        patch("fn_predict.get_news_container", return_value=None),
         patch("fn_predict.get_anthropic_client", return_value=mock_claude),
     ):
-        await predict_main(queue_msg)
-        await predict_main(queue_msg)
+        await _main_async(queue_msg)
+        await _main_async(queue_msg)
 
-    # upsert called twice — both on the same doc id (idempotent via Cosmos upsert)
     assert mock_predictions_container.upsert_item.call_count == 2
     calls = mock_predictions_container.upsert_item.call_args_list
     assert calls[0][1]["body"]["id"] == calls[1][1]["body"]["id"]
+
+
+# ---------------------------------------------------------------------------
+# _fetch_news_parallel — unit tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_news_fetch_is_parallel():
+    """All teams should be fetched concurrently via asyncio.gather."""
+    teams = [_make_team("A", "Germany"), _make_team("B", "Brazil"), _make_team("C", "France")]
+
+    with patch("fn_predict.search_team_news", new=AsyncMock(return_value=["headline"])) as mock_search:
+        result = await _fetch_news_parallel(
+            teams, serpa_key="key", max_results=3, today="2026-06-06",
+            news_container=None, usage_container=None,
+        )
+
+    assert mock_search.call_count == 3
+    assert "Germany" in result
+    assert "Brazil" in result
+    assert "France" in result
+
+
+@pytest.mark.asyncio
+async def test_news_cached_after_fetch():
+    """After fetching, snippets should be upserted into the news container."""
+    teams = [_make_team("A", "Germany")]
+    mock_news_container = MagicMock()
+    mock_news_container.read_item = AsyncMock(side_effect=Exception("not found"))
+    mock_news_container.upsert_item = AsyncMock()
+
+    with patch("fn_predict.search_team_news", new=AsyncMock(return_value=["headline"])):
+        await _fetch_news_parallel(
+            teams, serpa_key="key", max_results=3, today="2026-06-06",
+            news_container=mock_news_container, usage_container=None,
+        )
+
+    mock_news_container.upsert_item.assert_called_once()
+    cached_doc = mock_news_container.upsert_item.call_args[1]["body"]
+    assert cached_doc["teamName"] == "Germany"
+    assert cached_doc["snippets"] == ["headline"]
+    assert "ttl" in cached_doc
+
+
+@pytest.mark.asyncio
+async def test_news_served_from_cache():
+    """Cached teams should not trigger a new Serper API call."""
+    teams = [_make_team("A", "Germany")]
+    mock_news_container = MagicMock()
+    mock_news_container.read_item = AsyncMock(return_value={
+        "id": "news-germany-2026-06-06",
+        "teamName": "Germany",
+        "snippets": ["cached headline"],
+    })
+
+    with patch("fn_predict.search_team_news", new=AsyncMock()) as mock_search:
+        result = await _fetch_news_parallel(
+            teams, serpa_key="key", max_results=3, today="2026-06-06",
+            news_container=mock_news_container, usage_container=None,
+        )
+
+    mock_search.assert_not_called()
+    assert result["Germany"] == ["cached headline"]

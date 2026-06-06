@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -74,8 +75,76 @@ def get_usage_container() -> Any | None:
     return db.get_container_client("usage")
 
 
+def get_news_container() -> Any | None:
+    conn_str = os.environ.get("CosmosDbConnectionString")
+    if not conn_str:
+        return None
+    cosmos = CosmosClient.from_connection_string(conn_str)
+    db = cosmos.get_database_client(os.environ.get("COSMOS_DATABASE_NAME", "wc2026"))
+    return db.get_container_client("news")
+
+
+def _safe_id(name: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9\-_]", "-", name).lower()
+
+
 def get_anthropic_client() -> anthropic.AsyncAnthropic:
     return anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+
+# ---------------------------------------------------------------------------
+# News fetching (parallel with Cosmos cache)
+# ---------------------------------------------------------------------------
+
+async def _fetch_news_parallel(
+    teams: list[dict[str, Any]],
+    serpa_key: str,
+    max_results: int,
+    today: str,
+    news_container: Any | None,
+    usage_container: Any | None,
+) -> dict[str, list[str]]:
+    team_names = [t.get("name", "") for t in teams if t.get("name")]
+    cached: dict[str, list[str]] = {}
+    uncached: list[str] = []
+
+    if news_container is not None:
+        for name in team_names:
+            cache_id = f"news-{_safe_id(name)}-{today}"
+            try:
+                doc = await news_container.read_item(item=cache_id, partition_key=name)
+                cached[name] = doc.get("snippets", [])
+            except Exception:
+                uncached.append(name)
+    else:
+        uncached = list(team_names)
+
+    if not uncached:
+        return cached
+
+    tasks = [search_team_news(name, api_key=serpa_key, max_results=max_results) for name in uncached]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    fetched: dict[str, list[str]] = {}
+    for name, result in zip(uncached, results):
+        snippets = result if isinstance(result, list) else []
+        fetched[name] = snippets
+        if news_container is not None:
+            cache_id = f"news-{_safe_id(name)}-{today}"
+            try:
+                await news_container.upsert_item(body={
+                    "id": cache_id,
+                    "teamName": name,
+                    "date": today,
+                    "snippets": snippets,
+                    "ttl": 43200,
+                })
+            except Exception as e:
+                logger.warning("Failed to cache news for %s: %s", name, e)
+        if snippets and usage_container is not None:
+            await record_call(usage_container, "serper")
+
+    return {**cached, **fetched}
 
 
 # ---------------------------------------------------------------------------
@@ -196,6 +265,7 @@ async def _main_async(msg: func.QueueMessage) -> None:
 
         teams_container, fixtures_container, predictions_container, scores_container = get_containers()
         usage_container = get_usage_container()
+        news_container = get_news_container()
         claude = get_anthropic_client()
         logger.info("Containers and clients initialized")
 
@@ -206,11 +276,11 @@ async def _main_async(msg: func.QueueMessage) -> None:
         news: dict[str, list[str]] = {}
         serpa_key = os.environ.get("SERPA_API_KEY")
         if serpa_key:
-            for team in teams:
-                team_name = team.get("name", "")
-                if team_name:
-                    news[team_name] = await search_team_news(team_name, api_key=serpa_key)
-                    await record_call(usage_container, "serper")
+            max_results = int(os.environ.get("SERPA_MAX_RESULTS", "3"))
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            news = await _fetch_news_parallel(
+                teams, serpa_key, max_results, today, news_container, usage_container
+            )
 
         prompt = _build_prompt(teams=teams, fixtures=fixtures, news=news or None)
 
