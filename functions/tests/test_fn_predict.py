@@ -109,6 +109,72 @@ def test_build_prompt_news_section_label():
     assert "NEWS" in prompt.upper() or "news" in prompt.lower()
 
 
+def _group_of_fixture_in_prompt(prompt: str, fixture_substring: str) -> str | None:
+    """Return the group letter of the most recent standalone 'Group X:' heading
+    before the line containing fixture_substring. Returns None if not found."""
+    import re
+    current_group = None
+    for line in prompt.split("\n"):
+        m = re.match(r"^Group ([A-Z]):\s*$", line.strip())
+        if m:
+            current_group = m.group(1)
+        if fixture_substring in line:
+            return current_group
+    return None
+
+
+def test_build_prompt_fixtures_grouped_by_group():
+    """Upcoming fixtures must appear under their group's detail section.
+
+    Reproduces issue #19: Netherlands (Group F) vs Sweden (Group F) was
+    appearing in Group E predictions because _build_prompt listed all upcoming
+    fixtures flat and Claude had to guess the group — getting it wrong.
+
+    Groups G+ are included so the flat fixture section (if still present) falls
+    under Group G, making the assertion fail on unpatched code.
+    """
+    teams = [
+        _make_team("E", "Germany"), _make_team("E", "Ecuador"),
+        _make_team("E", "Ivory Coast"), _make_team("E", "Curaçao"),
+        _make_team("F", "Netherlands"), _make_team("F", "Sweden"),
+        _make_team("F", "Japan"), _make_team("F", "Tunisia"),
+        _make_team("G", "Spain"), _make_team("G", "Morocco"),  # group after F
+    ]
+    fixtures = [
+        _make_fixture(2, "Netherlands", "Sweden", "NS"),
+        _make_fixture(2, "Germany", "Ivory Coast", "NS"),
+    ]
+    prompt = _build_prompt(teams=teams, fixtures=fixtures)
+
+    assert _group_of_fixture_in_prompt(prompt, "Netherlands vs Sweden") == "F", (
+        "Netherlands vs Sweden must appear under the Group F detail section"
+    )
+    assert _group_of_fixture_in_prompt(prompt, "Germany vs Ivory Coast") == "E", (
+        "Germany vs Ivory Coast must appear under the Group E detail section"
+    )
+
+
+def test_build_prompt_completed_results_grouped_by_group():
+    """Completed results must also appear under their group's detail section."""
+    teams = [
+        _make_team("E", "Germany"), _make_team("E", "Ecuador"),
+        _make_team("F", "Netherlands"), _make_team("F", "Sweden"),
+        _make_team("G", "Spain"), _make_team("G", "Morocco"),
+    ]
+    fixtures = [
+        _make_fixture(1, "Netherlands", "Sweden", "FT", 2, 1),
+        _make_fixture(1, "Germany", "Ecuador", "FT", 3, 0),
+    ]
+    prompt = _build_prompt(teams=teams, fixtures=fixtures)
+
+    assert _group_of_fixture_in_prompt(prompt, "Netherlands 2–1") == "F", (
+        "Netherlands result must appear under the Group F detail section"
+    )
+    assert _group_of_fixture_in_prompt(prompt, "Germany 3") == "E", (
+        "Germany result must appear under the Group E detail section"
+    )
+
+
 # ---------------------------------------------------------------------------
 # _parse_claude_response
 # ---------------------------------------------------------------------------

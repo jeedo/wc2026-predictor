@@ -63,7 +63,7 @@ Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
 - Calls API-Football v3 (`https://v3.football.api-sports.io`) to fetch current WC fixtures and match results
 - On first run: seeds the `teams` container with all 48 teams, group assignments, FIFA rankings
 - Upserts latest fixture and result data into the `fixtures` Cosmos DB container
-- After each upsert, compares incoming `status` against the previously stored value; if any fixture transitions to `FINISHED`, enqueues a message to the `predict-trigger` Storage Queue
+- After each upsert, compares incoming `status` against the previously stored value; if any fixture transitions to `FINISHED`, enqueues a **Base64-encoded** JSON message `{"matchday": N, "fixtureId": null}` to the `predict-trigger` Storage Queue — Base64 encoding is required because the Azure Functions queue trigger is configured with `MessageEncoding: Base64`
 - Runs only during the tournament window (June 12 – July 2) to conserve executions
 
 #### fn-predict — Queue Trigger (`predict-trigger` queue)
@@ -74,7 +74,7 @@ Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
   2. When the `POST /api/predictions/trigger` HTTP endpoint is called (on-demand, before tournament starts)
 - Reads current `fixtures` and `teams` data from Cosmos DB
 - Constructs a structured prompt with group standings, team form, and FIFA rankings
-- If `SERPA_API_KEY` is set, fetches recent news for all teams **in parallel** via `asyncio.gather()` using Serper.dev, enriching the Claude prompt with up-to-date injury/form/squad information; results are cached in the `news` Cosmos container for 12 hours (configurable via `SERPA_MAX_RESULTS`, default 3) to avoid redundant API calls within the same matchday
+- If `SERPA_API_KEY` is set, fetches recent news for all teams **in parallel** via `asyncio.gather()` using **SerpApi** (`GET https://serpapi.com/search.json?engine=google_news`), enriching the Claude prompt with up-to-date injury/form/squad information; results are cached in the `news` Cosmos container for 12 hours (configurable via `SERPA_MAX_RESULTS`, default 3) to avoid redundant API calls within the same matchday
 - Calls Claude API (`claude-haiku-4-5`) requesting JSON output: group winner, runner-up, confidence level, reasoning per group, and per-match predictions with confidence
 - Writes prediction documents to the `predictions` container, versioned by matchday
 - Idempotent: if multiple messages arrive for the same matchday (e.g. two matches finish in the same 6h window), the latest run overwrites the previous prediction document
