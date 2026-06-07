@@ -191,6 +191,11 @@ def _build_prompt(
         g = team_to_group.get(f.get("homeTeam", ""), "?")
         upcoming_by_group[g].append(f)
 
+    completed_by_group: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for f in completed:
+        g = team_to_group.get(f.get("homeTeam", ""), "?")
+        completed_by_group[g].append(f)
+
     schema = (
         '{"predictions": ['
         '{"group": "A", "winner": "...", "runnerUp": "...", "confidence": "high|medium|low", "reasoning": "...", '
@@ -226,20 +231,18 @@ def _build_prompt(
         for t in groups[letter]:
             form = "".join(t.get("recentForm", []))
             lines.append(f"  - {t['name']} | FIFA rank: {t.get('fifaRanking', 'N/A')} | form: {form or 'none'}")
-
-    if completed:
-        lines.append("\nCOMPLETED RESULTS:")
-        for f in completed:
-            lines.append(
-                f"  {f['homeTeam']} {f['homeScore']}–{f['awayScore']} {f['awayTeam']} (MD{f['matchday']})"
-            )
-
-    if upcoming:
-        lines.append("\nUPCOMING FIXTURES (predict scores for each):")
-        for f in upcoming:
-            lines.append(
-                f"  MD{f['matchday']}: {f['homeTeam']} vs {f['awayTeam']}"
-            )
+        if completed_by_group[letter]:
+            lines.append("  Completed results:")
+            for f in completed_by_group[letter]:
+                lines.append(
+                    f"    {f['homeTeam']} {f['homeScore']}–{f['awayScore']} {f['awayTeam']} (MD{f['matchday']})"
+                )
+        if upcoming_by_group[letter]:
+            lines.append("  Upcoming fixtures (predict scores for each):")
+            for f in upcoming_by_group[letter]:
+                lines.append(
+                    f"    MD{f['matchday']}: {f['homeTeam']} vs {f['awayTeam']}"
+                )
 
     if news:
         lines.append("\nRECENT TEAM NEWS:")
