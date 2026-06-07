@@ -236,7 +236,7 @@ async def main(mytimer: func.TimerRequest) -> None:
                 if _should_enqueue(prev_status, doc["status"]):
                     message = json.dumps(
                         {"matchday": matchday, "fixtureId": doc["fixtureId"]}
-                    )
+                    ).encode()
                     await queue.send_message(message)
                     total_enqueued += 1
                     fixture_summary[matchday]["enqueued"] += 1

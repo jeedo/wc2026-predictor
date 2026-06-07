@@ -465,7 +465,7 @@ def _handle_predictions_trigger(
             mimetype="application/json",
         )
 
-    message = json.dumps({"matchday": matchday, "fixtureId": None})
+    message = json.dumps({"matchday": matchday, "fixtureId": None}).encode()
     queue_client.send_message(message)
     logger.info("Enqueued prediction trigger for matchday %s", matchday)
 
