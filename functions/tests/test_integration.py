@@ -220,8 +220,8 @@ async def test_predict_writes_predictions_for_all_groups():
         from fn_predict import _main_async
         await _main_async(queue_msg)
 
-    assert "prediction-md1" in predictions_db._docs
-    doc = predictions_db._docs["prediction-md1"]
+    assert "predictions-all" in predictions_db._docs
+    doc = predictions_db._docs["predictions-all"]
     assert doc["matchday"] == 1
     assert len(doc["groups"]) == 12, "All 12 groups should be predicted"
     assert doc["groups"][0]["winner"] == "TeamA1"
@@ -233,8 +233,8 @@ async def test_predict_writes_predictions_for_all_groups():
 
 def test_api_returns_prediction_written_by_predict():
     predictions_db = InMemContainer()
-    predictions_db._docs["prediction-md1"] = {
-        "id": "prediction-md1",
+    predictions_db._docs["predictions-all"] = {
+        "id": "predictions-all",
         "matchday": 1,
         "generatedAt": "2026-06-12T10:00:00Z",
         "groups": [
@@ -311,7 +311,7 @@ async def test_full_pipeline_end_to_end():
         from fn_predict import _main_async
         await _main_async(queue_msg)
 
-    assert "prediction-md1" in predictions_db._docs
+    assert "predictions-all" in predictions_db._docs
 
     # Call fn_api and verify response
     req = func.HttpRequest(

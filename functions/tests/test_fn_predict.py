@@ -279,6 +279,7 @@ async def test_predict_writes_prediction_doc(queue_msg):
 
     mock_predictions_container.upsert_item.assert_called_once()
     doc = mock_predictions_container.upsert_item.call_args[1]["body"]
+    assert doc["id"] == "predictions-all"
     assert doc["matchday"] == 1
     assert len(doc["groups"]) == 1
 
