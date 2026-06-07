@@ -29,7 +29,7 @@ async def query_items(
     parameters: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Async iteration over AsyncItemPaged — for use with the async CosmosClient."""
-    kwargs: dict[str, Any] = {"query": query, "enable_cross_partition_query": True}
+    kwargs: dict[str, Any] = {"query": query}
     if parameters:
         kwargs["parameters"] = parameters
     results: list[dict[str, Any]] = []
@@ -44,7 +44,7 @@ def query_items_sync(
     parameters: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """For use with the sync CosmosClient (fn_api)."""
-    kwargs: dict[str, Any] = {"query": query, "enable_cross_partition_query": True}
+    kwargs: dict[str, Any] = {"query": query}
     if parameters:
         kwargs["parameters"] = parameters
     return list(container.query_items(**kwargs))

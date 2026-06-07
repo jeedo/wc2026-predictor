@@ -93,6 +93,7 @@ async def test_ingest_seeds_teams_on_first_run():
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=fake_teams)),
         patch("fn_ingest.fetch_matches_fd", AsyncMock(return_value=fake_fixtures)),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
     ):
         await ingest_main(timer)
 
@@ -136,6 +137,7 @@ async def test_ingest_enqueues_on_finished_transition():
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_matches_fd", side_effect=_fixtures_by_matchday),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
     ):
         await ingest_main(timer)
 

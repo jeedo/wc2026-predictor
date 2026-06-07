@@ -134,6 +134,7 @@ async def test_ingest_seeds_teams_and_upserts_fixture():
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=STUB_TEAMS)),
         patch("fn_ingest.fetch_matches_fd", side_effect=_fixtures_stub),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
     ):
         from fn_ingest import main as ingest_main
         await ingest_main(MagicMock(past_due=False))
@@ -169,6 +170,7 @@ async def test_ingest_enqueues_message_on_finish():
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_matches_fd", side_effect=_ft_stub),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
     ):
         from fn_ingest import main as ingest_main
         await ingest_main(MagicMock(past_due=False))
@@ -201,7 +203,8 @@ async def test_predict_writes_predictions_for_all_groups():
     mock_claude = MagicMock()
     mock_resp = MagicMock()
     mock_resp.content = [MagicMock(text=CLAUDE_STUB)]
-    mock_claude.messages.create = AsyncMock(return_value=mock_resp)
+    mock_resp.usage = MagicMock(input_tokens=100, output_tokens=50)
+    mock_claude.beta.messages.parse = AsyncMock(return_value=mock_resp)
 
     queue_msg = MagicMock()
     queue_msg.get_body.return_value = json.dumps(
@@ -212,9 +215,10 @@ async def test_predict_writes_predictions_for_all_groups():
         patch("fn_predict.get_containers",
               return_value=(teams_db, fixtures_db, predictions_db, scores_db)),
         patch("fn_predict.get_anthropic_client", return_value=mock_claude),
+        patch("fn_predict.get_news_container", return_value=None),
     ):
-        from fn_predict import main as predict_main
-        await predict_main(queue_msg)
+        from fn_predict import _main_async
+        await _main_async(queue_msg)
 
     assert "prediction-md1" in predictions_db._docs
     doc = predictions_db._docs["prediction-md1"]
@@ -280,6 +284,7 @@ async def test_full_pipeline_end_to_end():
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=STUB_TEAMS)),
         patch("fn_ingest.fetch_matches_fd", side_effect=_fixtures_stub),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
     ):
         from fn_ingest import main as ingest_main
         await ingest_main(MagicMock(past_due=False))
@@ -291,7 +296,8 @@ async def test_full_pipeline_end_to_end():
     mock_claude = MagicMock()
     mock_resp = MagicMock()
     mock_resp.content = [MagicMock(text=CLAUDE_STUB)]
-    mock_claude.messages.create = AsyncMock(return_value=mock_resp)
+    mock_resp.usage = MagicMock(input_tokens=100, output_tokens=50)
+    mock_claude.beta.messages.parse = AsyncMock(return_value=mock_resp)
 
     queue_msg = MagicMock()
     queue_msg.get_body.return_value = raw.encode() if isinstance(raw, str) else raw
@@ -300,9 +306,10 @@ async def test_full_pipeline_end_to_end():
         patch("fn_predict.get_containers",
               return_value=(teams_db, fixtures_db, predictions_db, scores_db)),
         patch("fn_predict.get_anthropic_client", return_value=mock_claude),
+        patch("fn_predict.get_news_container", return_value=None),
     ):
-        from fn_predict import main as predict_main
-        await predict_main(queue_msg)
+        from fn_predict import _main_async
+        await _main_async(queue_msg)
 
     assert "prediction-md1" in predictions_db._docs
 

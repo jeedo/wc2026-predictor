@@ -13,7 +13,8 @@ from typing import Any
 
 import azure.functions as func
 import httpx
-from azure.cosmos import CosmosClient  # sync client — fn_api is synchronous
+from azure.cosmos import CosmosClient, PartitionKey  # sync client — fn_api is synchronous
+from azure.storage.queue import QueueClient
 
 from shared.cosmos import query_items_sync as query_items
 from shared.usage_tracker import PROVIDER_LIMITS
@@ -44,8 +45,8 @@ def get_containers() -> tuple[Any, Any, Any, Any, Any]:
     )
 
 
-def get_queue_client():
-    from azure.storage.queue import QueueClient, BinaryBase64EncodePolicy
+def get_queue_client() -> QueueClient:
+    from azure.storage.queue import BinaryBase64EncodePolicy
     return QueueClient.from_connection_string(
         os.environ["AzureWebJobsStorage"],
         queue_name=os.environ.get("PREDICT_QUEUE_NAME", "predict-trigger"),
@@ -217,7 +218,7 @@ def _ensure_cosmos_containers() -> tuple[Any, Any, Any, Any, Any]:
             try:
                 db.create_container(
                     id=container_name,
-                    partition_key=partition_key,
+                    partition_key=PartitionKey(path=partition_key),
                     offer_throughput=400,
                 )
                 logger.info("Container '%s' created successfully", container_name)
@@ -405,12 +406,12 @@ def _handle_predictions_generate(
 
         # Record usage
         from shared.usage_tracker import record_call
-        record_call(usage_container, "anthropic",
-                   inputTokens=response.usage.input_tokens,
-                   outputTokens=response.usage.output_tokens)
+        asyncio.run(record_call(usage_container, "anthropic",
+                                inputTokens=response.usage.input_tokens,
+                                outputTokens=response.usage.output_tokens))
 
         # Parse and store predictions (structured output returns pure JSON)
-        raw_text = response.content[0].text
+        raw_text = response.content[0].text  # type: ignore[union-attr]
         logger.info("Claude structured response: %d chars", len(raw_text))
 
         predictions = _parse_claude_response(raw_text)

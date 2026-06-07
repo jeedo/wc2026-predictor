@@ -48,6 +48,8 @@ def _get_football_data_api_key() -> str:
     cred = DefaultAzureCredential()
     client = SecretClient(vault_url=kv_uri, credential=cred)
     secret = client.get_secret("football-data-api-key")
+    if secret.value is None:
+        raise ValueError("football-data-api-key secret has no value")
     return secret.value
 
 
@@ -177,7 +179,7 @@ async def main(mytimer: func.TimerRequest) -> None:
             await record_call(usage_container, "api-football")
 
             logger.info("Processing %d teams into Cosmos DB documents", len(raw_teams))
-            by_group = {}
+            by_group: dict[str, list[str]] = {}
             for raw in raw_teams:
                 team_name = raw.get("name", "Unknown")
                 # Use derived group if available, otherwise use API data or default

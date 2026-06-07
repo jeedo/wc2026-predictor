@@ -357,7 +357,7 @@ async def _main_async(msg: func.QueueMessage) -> None:
         })
 
         stage = "write"
-        raw_text = response.content[0].text
+        raw_text = response.content[0].text  # type: ignore[union-attr]
         predictions = _parse_claude_response(raw_text)
 
         now = datetime.now(timezone.utc).isoformat()
