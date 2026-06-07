@@ -42,7 +42,7 @@ async def test_read_item_returns_document(mock_container):
 async def test_query_items_returns_list(mock_container):
     results = await query_items(mock_container, query="SELECT * FROM c")
     mock_container.query_items.assert_called_once_with(
-        query="SELECT * FROM c", enable_cross_partition_query=True
+        query="SELECT * FROM c"
     )
     assert len(results) == 2
 

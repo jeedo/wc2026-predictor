@@ -43,7 +43,8 @@ When the user asks to implement a task from `docs/plan.md`:
 3. **Write tests first** — run them and confirm they **fail** (red phase)
 4. Implement the feature until all tests pass (green phase)
 5. Mark the task complete: `python scripts/complete_task.py <task-number>`
-6. Commit using a conventional commit message (includes the updated `docs/plan.md`)
+6. Before committing, run `uv run pytest` and `uv run mypy fn_predict fn_api fn_ingest shared --ignore-missing-imports` — both must pass clean
+7. Commit using a conventional commit message (includes the updated `docs/plan.md`)
 7. Push and open a PR: `gh pr create`
 
 ---

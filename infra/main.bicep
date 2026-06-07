@@ -130,6 +130,18 @@ resource usageContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/cont
   }
 }
 
+resource newsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers@2024-02-15-preview' = {
+  parent: cosmosDatabase
+  name: 'news'
+  properties: {
+    resource: {
+      id: 'news'
+      partitionKey: { paths: ['/teamName'], kind: 'Hash' }
+      defaultTtl: -1
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Application Insights
 // ---------------------------------------------------------------------------

@@ -5,6 +5,8 @@ import asyncio
 import json
 import logging
 import os
+import re
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -16,11 +18,16 @@ from azure.cosmos.aio import CosmosClient
 from shared.cosmos import upsert_item, query_items
 from shared.serpa import search_team_news
 from shared.usage_tracker import record_call
+from shared.telemetry import track_event, track_exception
 from fn_predict.scoring import compute_accuracy
 
 logger = logging.getLogger(__name__)
 
-_MODEL = "claude-sonnet-4-5"  # Upgraded to Sonnet for structured outputs
+# Module-level diagnostic: fires on import, before any invocation. If this
+# does NOT appear in App Insights traces, the crash is at import time.
+logger.info("fn_predict module loaded")
+
+_MODEL = "claude-sonnet-4-5"
 _MAX_TOKENS = 4096
 
 
@@ -74,8 +81,90 @@ def get_usage_container() -> Any | None:
     return db.get_container_client("usage")
 
 
+def get_news_container() -> Any | None:
+    conn_str = os.environ.get("CosmosDbConnectionString")
+    if not conn_str:
+        return None
+    cosmos = CosmosClient.from_connection_string(conn_str)
+    db = cosmos.get_database_client(os.environ.get("COSMOS_DATABASE_NAME", "wc2026"))
+    return db.get_container_client("news")
+
+
+def _safe_id(name: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9\-_]", "-", name).lower()
+
+
 def get_anthropic_client() -> anthropic.AsyncAnthropic:
     return anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+
+# ---------------------------------------------------------------------------
+# News fetching (parallel with Cosmos cache)
+# ---------------------------------------------------------------------------
+
+async def _fetch_news_parallel(
+    teams: list[dict[str, Any]],
+    serpa_key: str,
+    max_results: int,
+    today: str,
+    news_container: Any | None,
+    usage_container: Any | None,
+) -> dict[str, list[str]]:
+    team_names = [t.get("name", "") for t in teams if t.get("name")]
+    cached: dict[str, list[str]] = {}
+    uncached: list[str] = []
+
+    if news_container is not None:
+        for name in team_names:
+            cache_id = f"news-{_safe_id(name)}-{today}"
+            try:
+                doc = await news_container.read_item(item=cache_id, partition_key=name)
+                cached[name] = doc.get("snippets", [])
+            except Exception:
+                uncached.append(name)
+    else:
+        uncached = list(team_names)
+
+    if not uncached:
+        track_event("fn_predict/news_all_cached", {"cached_count": str(len(cached))})
+        return cached
+
+    t0 = time.monotonic()
+    tasks = [search_team_news(name, api_key=serpa_key, max_results=max_results) for name in uncached]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+
+    fetched: dict[str, list[str]] = {}
+    error_count = 0
+    for name, result in zip(uncached, results):
+        if isinstance(result, list):
+            snippets = result
+        else:
+            snippets = []
+            error_count += 1
+        fetched[name] = snippets
+        if news_container is not None:
+            cache_id = f"news-{_safe_id(name)}-{today}"
+            try:
+                await news_container.upsert_item(body={
+                    "id": cache_id,
+                    "teamName": name,
+                    "date": today,
+                    "snippets": snippets,
+                    "ttl": 43200,
+                })
+            except Exception as e:
+                logger.warning("Failed to cache news for %s: %s", name, e)
+        if snippets and usage_container is not None:
+            await record_call(usage_container, "serper")
+
+    track_event("fn_predict/news_fetched", {
+        "cached_count": str(len(cached)),
+        "fetched_count": str(len(fetched)),
+        "error_count": str(error_count),
+        "elapsed_ms": str(elapsed_ms),
+    })
+    return {**cached, **fetched}
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +185,6 @@ def _build_prompt(
     completed = [f for f in fixtures if f.get("status") == "FT"]
     upcoming = [f for f in fixtures if f.get("status") not in ("FT", "1H", "2H", "HT", "ET", "P")]
 
-    # Group upcoming fixtures by group letter via team lookup
     team_to_group: dict[str, str] = {t["name"]: t.get("group", "?") for t in teams}
     upcoming_by_group: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for f in upcoming:
@@ -121,7 +209,6 @@ def _build_prompt(
         "REQUIRED GROUP ASSIGNMENTS (DO NOT CHANGE):",
     ]
 
-    # Build group assignments dynamically from team data
     for letter in sorted(groups.keys()):
         team_names = [t["name"] for t in groups[letter]]
         lines.append(f"Group {letter}: {', '.join(team_names)}")
@@ -185,36 +272,62 @@ def _parse_claude_response(text: str) -> list[dict[str, Any]]:
 
 def main(msg: func.QueueMessage) -> None:
     logger.info("Prediction queue message received")
+    track_event("fn_predict/invoked")
     asyncio.run(_main_async(msg))
 
 
 async def _main_async(msg: func.QueueMessage) -> None:
+    stage = "init"
+    matchday: int = -1
     try:
         payload = json.loads(msg.get_body().decode())
-        matchday: int = payload["matchday"]
+        matchday = payload["matchday"]
         logger.info("Generating predictions for matchday %s", matchday)
+        track_event("fn_predict/started", {"matchday": str(matchday)})
 
+        stage = "containers"
         teams_container, fixtures_container, predictions_container, scores_container = get_containers()
         usage_container = get_usage_container()
+        news_container = get_news_container()
         claude = get_anthropic_client()
         logger.info("Containers and clients initialized")
 
+        stage = "data_load"
         logger.info("Querying teams...")
         teams = await query_items(teams_container, "SELECT * FROM c")
         fixtures = await query_items(fixtures_container, "SELECT * FROM c")
+        track_event("fn_predict/data_loaded", {
+            "matchday": str(matchday),
+            "teams_count": str(len(teams)),
+            "fixtures_count": str(len(fixtures)),
+        })
 
+        stage = "news"
         news: dict[str, list[str]] = {}
         serpa_key = os.environ.get("SERPA_API_KEY")
         if serpa_key:
-            for team in teams:
-                team_name = team.get("name", "")
-                if team_name:
-                    news[team_name] = await search_team_news(team_name, api_key=serpa_key)
-                    await record_call(usage_container, "serper")
+            max_results = int(os.environ.get("SERPA_MAX_RESULTS", "3"))
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            news = await _fetch_news_parallel(
+                teams, serpa_key, max_results, today, news_container, usage_container
+            )
+        else:
+            track_event("fn_predict/news_skipped", {"reason": "no_serpa_key"})
 
+        news_team_count = sum(1 for v in news.values() if v)
         prompt = _build_prompt(teams=teams, fixtures=fixtures, news=news or None)
+        logger.info(
+            "Prompt built: %d chars, %d teams with news",
+            len(prompt), news_team_count,
+        )
+        track_event("fn_predict/prompt_built", {
+            "matchday": str(matchday),
+            "prompt_chars": str(len(prompt)),
+            "news_teams": str(news_team_count),
+        })
 
-        # Use structured outputs to guarantee valid JSON
+        stage = "claude"
+        t0 = time.monotonic()
         response = await claude.beta.messages.parse(
             model=_MODEL,
             max_tokens=_MAX_TOKENS,
@@ -227,6 +340,7 @@ async def _main_async(msg: func.QueueMessage) -> None:
             },
             betas=["structured-outputs-2025-11-13"],
         )
+        claude_ms = int((time.monotonic() - t0) * 1000)
 
         usage = response.usage
         await record_call(
@@ -234,12 +348,19 @@ async def _main_async(msg: func.QueueMessage) -> None:
             inputTokens=usage.input_tokens,
             outputTokens=usage.output_tokens,
         )
+        track_event("fn_predict/claude_complete", {
+            "matchday": str(matchday),
+            "input_tokens": str(usage.input_tokens),
+            "output_tokens": str(usage.output_tokens),
+            "elapsed_ms": str(claude_ms),
+            "model": _MODEL,
+        })
 
-        raw_text = response.content[0].text
+        stage = "write"
+        raw_text = response.content[0].text  # type: ignore[union-attr]
         predictions = _parse_claude_response(raw_text)
 
         now = datetime.now(timezone.utc).isoformat()
-
         prediction_doc: dict[str, Any] = {
             "id": f"prediction-md{matchday}",
             "matchday": matchday,
@@ -248,8 +369,12 @@ async def _main_async(msg: func.QueueMessage) -> None:
         }
         await upsert_item(predictions_container, prediction_doc)
         logger.info("Wrote %d group predictions for matchday %s", len(predictions), matchday)
+        track_event("fn_predict/prediction_written", {
+            "matchday": str(matchday),
+            "groups_count": str(len(predictions)),
+        })
 
-        # Accuracy scoring against completed fixtures
+        stage = "accuracy"
         finished_fixtures = [f for f in fixtures if f.get("status") == "FT"]
         if finished_fixtures and predictions:
             standings = await query_items(
@@ -268,6 +393,15 @@ async def _main_async(msg: func.QueueMessage) -> None:
                 "Accuracy for matchday %s: %s/%s",
                 matchday, accuracy["score"], accuracy["totalGroups"],
             )
+            track_event("fn_predict/accuracy_scored", {
+                "matchday": str(matchday),
+                "score": str(accuracy["score"]),
+                "total_groups": str(accuracy["totalGroups"]),
+            })
+
+        track_event("fn_predict/completed", {"matchday": str(matchday), "stage": stage})
+
     except Exception as e:
-        logger.error("Error generating predictions for matchday: %s", str(e), exc_info=True)
+        logger.error("Error generating predictions at stage=%s matchday=%s: %s", stage, matchday, str(e), exc_info=True)
+        track_exception(e, {"stage": stage, "matchday": str(matchday)})
         raise

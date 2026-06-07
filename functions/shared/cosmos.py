@@ -29,7 +29,7 @@ async def query_items(
     parameters: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Async iteration over AsyncItemPaged — for use with the async CosmosClient."""
-    kwargs: dict[str, Any] = {"query": query, "enable_cross_partition_query": True}
+    kwargs: dict[str, Any] = {"query": query}
     if parameters:
         kwargs["parameters"] = parameters
     results: list[dict[str, Any]] = []

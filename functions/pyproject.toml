@@ -12,6 +12,7 @@ dependencies = [
     "azure-keyvault-secrets>=4.11.0",
     "azure-storage-queue>=12.16.0",
     "httpx>=0.28.1",
+    "opencensus-ext-azure>=1.1.15",
 ]
 
 [dependency-groups]

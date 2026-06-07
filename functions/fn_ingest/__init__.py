@@ -10,6 +10,7 @@ import azure.functions as func
 import httpx
 from azure.cosmos.aio import CosmosClient
 from azure.storage.queue.aio import QueueClient
+from azure.storage.queue import BinaryBase64EncodePolicy
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 
@@ -47,6 +48,8 @@ def _get_football_data_api_key() -> str:
     cred = DefaultAzureCredential()
     client = SecretClient(vault_url=kv_uri, credential=cred)
     secret = client.get_secret("football-data-api-key")
+    if secret.value is None:
+        raise ValueError("football-data-api-key secret has no value")
     return secret.value
 
 
@@ -121,6 +124,7 @@ def get_queue_client() -> QueueClient:
     return QueueClient.from_connection_string(
         os.environ["AzureWebJobsStorage"],
         queue_name=os.environ.get("PREDICT_QUEUE_NAME", "predict-trigger"),
+        message_encode_policy=BinaryBase64EncodePolicy(),
     )
 
 
@@ -175,7 +179,7 @@ async def main(mytimer: func.TimerRequest) -> None:
             await record_call(usage_container, "api-football")
 
             logger.info("Processing %d teams into Cosmos DB documents", len(raw_teams))
-            by_group = {}
+            by_group: dict[str, list[str]] = {}
             for raw in raw_teams:
                 team_name = raw.get("name", "Unknown")
                 # Use derived group if available, otherwise use API data or default
@@ -234,7 +238,7 @@ async def main(mytimer: func.TimerRequest) -> None:
                 if _should_enqueue(prev_status, doc["status"]):
                     message = json.dumps(
                         {"matchday": matchday, "fixtureId": doc["fixtureId"]}
-                    )
+                    ).encode()
                     await queue.send_message(message)
                     total_enqueued += 1
                     fixture_summary[matchday]["enqueued"] += 1
