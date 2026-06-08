@@ -258,6 +258,130 @@ def test_trigger_predictions_rejects_invalid_matchday():
 
 
 # ---------------------------------------------------------------------------
+# GET /api/status (issue #24)
+# ---------------------------------------------------------------------------
+
+def _make_queue_props(count: int = 0) -> MagicMock:
+    props = MagicMock()
+    props.approximate_message_count = count
+    return props
+
+
+def test_status_returns_200():
+    req = _make_request(url="http://localhost/api/status")
+    containers = _mock_containers(
+        teams=TEAM_DOCS,
+        predictions=[PREDICTION_DOC],
+        fixtures=FIXTURE_DOCS,
+    )
+    mock_queue = MagicMock()
+    mock_queue.get_queue_properties.return_value = _make_queue_props(0)
+    mock_poison = MagicMock()
+    mock_poison.get_queue_properties.return_value = _make_queue_props(0)
+
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_status_queue_clients", return_value=(mock_queue, mock_poison)):
+            resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert "prediction" in body
+    assert "queue" in body
+    assert "teams" in body
+    assert "fixtures" in body
+
+
+def test_status_prediction_metadata():
+    req = _make_request(url="http://localhost/api/status")
+    containers = _mock_containers(predictions=[PREDICTION_DOC])
+    mock_queue = MagicMock()
+    mock_queue.get_queue_properties.return_value = _make_queue_props(0)
+    mock_poison = MagicMock()
+    mock_poison.get_queue_properties.return_value = _make_queue_props(0)
+
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_status_queue_clients", return_value=(mock_queue, mock_poison)):
+            resp = api_main(req)
+
+    body = _json_body(resp)
+    assert body["prediction"]["generatedAt"] == PREDICTION_DOC["generatedAt"]
+    assert body["prediction"]["matchday"] == PREDICTION_DOC["matchday"]
+    assert body["prediction"]["groupCount"] == len(PREDICTION_DOC["groups"])
+
+
+def test_status_queue_message_counts():
+    req = _make_request(url="http://localhost/api/status")
+    containers = _mock_containers()
+    mock_queue = MagicMock()
+    mock_queue.get_queue_properties.return_value = _make_queue_props(3)
+    mock_poison = MagicMock()
+    mock_poison.get_queue_properties.return_value = _make_queue_props(1)
+
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_status_queue_clients", return_value=(mock_queue, mock_poison)):
+            resp = api_main(req)
+
+    body = _json_body(resp)
+    assert body["queue"]["approximateMessageCount"] == 3
+    assert body["queue"]["poisonMessageCount"] == 1
+
+
+def test_status_team_and_fixture_counts():
+    req = _make_request(url="http://localhost/api/status")
+    finished = {**FIXTURE_DOCS[0], "status": "FT"}
+    scheduled = {**FIXTURE_DOCS[0], "id": "fixture-102", "status": "NS"}
+    containers = _mock_containers(teams=TEAM_DOCS, fixtures=[finished, scheduled])
+    mock_queue = MagicMock()
+    mock_queue.get_queue_properties.return_value = _make_queue_props(0)
+    mock_poison = MagicMock()
+    mock_poison.get_queue_properties.return_value = _make_queue_props(0)
+
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_status_queue_clients", return_value=(mock_queue, mock_poison)):
+            resp = api_main(req)
+
+    body = _json_body(resp)
+    assert body["teams"]["count"] == len(TEAM_DOCS)
+    assert body["fixtures"]["total"] == 2
+    assert body["fixtures"]["finished"] == 1
+
+
+def test_status_degrades_gracefully_on_queue_error():
+    """A queue error should not fail the whole status response."""
+    req = _make_request(url="http://localhost/api/status")
+    containers = _mock_containers(teams=TEAM_DOCS)
+    mock_queue = MagicMock()
+    mock_queue.get_queue_properties.side_effect = Exception("queue unavailable")
+    mock_poison = MagicMock()
+    mock_poison.get_queue_properties.side_effect = Exception("queue unavailable")
+
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_status_queue_clients", return_value=(mock_queue, mock_poison)):
+            resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["queue"] is None
+
+
+def test_status_no_prediction_returns_null_prediction():
+    req = _make_request(url="http://localhost/api/status")
+    containers = _mock_containers(predictions=[])
+    mock_queue = MagicMock()
+    mock_queue.get_queue_properties.return_value = _make_queue_props(0)
+    mock_poison = MagicMock()
+    mock_poison.get_queue_properties.return_value = _make_queue_props(0)
+
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_status_queue_clients", return_value=(mock_queue, mock_poison)):
+            resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["prediction"] is None
+
+
+# ---------------------------------------------------------------------------
 # Observability / logging (issue #23)
 # ---------------------------------------------------------------------------
 
