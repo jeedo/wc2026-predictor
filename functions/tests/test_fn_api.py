@@ -257,6 +257,69 @@ def test_trigger_predictions_rejects_invalid_matchday():
     mock_queue.send_message.assert_not_called()
 
 
+# ---------------------------------------------------------------------------
+# Observability / logging (issue #23)
+# ---------------------------------------------------------------------------
+
+def test_get_predictions_returns_newest_when_multiple_docs(caplog):
+    """When multiple predictions-all docs exist (different Cosmos partitions),
+    the newest by generatedAt is returned and a WARNING is logged."""
+    old_doc = {**PREDICTION_DOC, "generatedAt": "2026-06-04T20:56:46Z", "matchday": None}
+    new_doc = {**PREDICTION_DOC, "generatedAt": "2026-06-08T04:13:32Z", "matchday": 1}
+
+    req = _make_request(url="http://localhost/api/predictions")
+    containers = _mock_containers(predictions=[old_doc, new_doc])
+
+    import logging
+    with patch("fn_api.get_containers", return_value=containers):
+        with caplog.at_level(logging.WARNING, logger="fn_api"):
+            resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["generatedAt"] == "2026-06-08T04:13:32Z"
+    assert any("2" in r.message and "prediction" in r.message.lower() for r in caplog.records if r.levelno == logging.WARNING), \
+        "Expected a WARNING log mentioning multiple prediction docs"
+
+
+def test_get_predictions_logs_served_doc(caplog):
+    """fn_api logs which prediction doc it's serving at INFO level."""
+    req = _make_request(url="http://localhost/api/predictions")
+    containers = _mock_containers(predictions=[PREDICTION_DOC])
+
+    import logging
+    with patch("fn_api.get_containers", return_value=containers):
+        with caplog.at_level(logging.INFO, logger="fn_api"):
+            resp = api_main(req)
+
+    assert resp.status_code == 200
+    assert any("prediction" in r.message.lower() and r.levelno == logging.INFO for r in caplog.records), \
+        "Expected an INFO log about the prediction doc being served"
+
+
+def test_trigger_logs_enqueued_message(caplog):
+    """fn_api logs the message payload when enqueuing a prediction trigger."""
+    req = _make_request(
+        method="POST",
+        url="http://localhost/api/predictions/trigger",
+        params={"route": "predictions/trigger"},
+        body=json.dumps({"matchday": 2}).encode("utf-8"),
+    )
+    mock_queue = MagicMock()
+    containers = _mock_containers()
+
+    import logging
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_queue_client", return_value=mock_queue):
+            with caplog.at_level(logging.INFO, logger="fn_api"):
+                api_main(req)
+
+    assert any("matchday" in r.message and "2" in r.message for r in caplog.records), \
+        "Expected an INFO log containing the matchday from the enqueued message"
+
+
+
+
 def test_response_shape_accuracy():
     """Verify accuracy response includes per-group breakdown."""
     req = _make_request(url="http://localhost/api/accuracy")
