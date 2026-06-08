@@ -86,6 +86,7 @@ Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
 - `GET /predictions` — returns latest Claude predictions with per-group reasoning and confidence levels
 - `GET /fixtures/{matchday}` — returns scheduled and completed matches for a given matchday with predicted scores and confidence
 - `GET /accuracy` — returns prediction accuracy stats after each matchday; a group counts as correct only if **both** predicted winner and runner-up match the actual final standings (strict scoring, max 12 points)
+- `GET /status` — pipeline health snapshot: latest prediction metadata, Storage Queue depths (including poison queue), team count, and finished/total fixture counts; each component degrades independently (returns `null` for that field on error)
 - `POST /api/predictions/trigger` — enqueue a prediction generation job (optional JSON body: `{"matchday": 1}`); allows pre-tournament predictions before any matches finish
 
 ### 3.3 Cosmos DB Schema

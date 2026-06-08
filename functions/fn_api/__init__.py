@@ -54,6 +54,15 @@ def get_queue_client() -> QueueClient:
     )
 
 
+def get_status_queue_clients() -> tuple[QueueClient, QueueClient]:
+    conn = os.environ["AzureWebJobsStorage"]
+    queue_name = os.environ.get("PREDICT_QUEUE_NAME", "predict-trigger")
+    return (
+        QueueClient.from_connection_string(conn, queue_name=queue_name),
+        QueueClient.from_connection_string(conn, queue_name=f"{queue_name}-poison"),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
@@ -203,6 +212,67 @@ def _handle_accuracy(scores_container: Any) -> func.HttpResponse:
     if not docs:
         return _json_404("No accuracy data available")
     return _json_200(docs[0])
+
+
+def _handle_status(
+    teams_container: Any,
+    fixtures_container: Any,
+    predictions_container: Any,
+    queue_client: Any,
+    poison_client: Any,
+) -> func.HttpResponse:
+    # Prediction metadata (lightweight — no groups payload)
+    prediction_status: dict[str, Any] | None = None
+    try:
+        pred_docs = query_items(
+            predictions_container,
+            "SELECT c.id, c.generatedAt, c.matchday, c.groups FROM c WHERE c.id = 'predictions-all'",
+        )
+        if pred_docs:
+            doc = max(pred_docs, key=lambda d: d.get("generatedAt", ""))
+            prediction_status = {
+                "generatedAt": doc.get("generatedAt"),
+                "matchday": doc.get("matchday"),
+                "groupCount": len(doc.get("groups", [])),
+            }
+    except Exception as e:
+        logger.warning("status: failed to query predictions: %s", e)
+
+    # Queue depths
+    queue_status: dict[str, Any] | None = None
+    try:
+        props = queue_client.get_queue_properties()
+        poison_props = poison_client.get_queue_properties()
+        queue_status = {
+            "approximateMessageCount": props.approximate_message_count,
+            "poisonMessageCount": poison_props.approximate_message_count,
+        }
+    except Exception as e:
+        logger.warning("status: failed to query queue: %s", e)
+
+    # Team count
+    teams_status: dict[str, Any] | None = None
+    try:
+        teams = query_items(teams_container, "SELECT c.id FROM c")
+        teams_status = {"count": len(teams)}
+    except Exception as e:
+        logger.warning("status: failed to query teams: %s", e)
+
+    # Fixture counts
+    fixtures_status: dict[str, Any] | None = None
+    try:
+        fixtures = query_items(fixtures_container, "SELECT c.id, c.status FROM c")
+        finished = sum(1 for f in fixtures if f.get("status") == "FT")
+        fixtures_status = {"total": len(fixtures), "finished": finished}
+    except Exception as e:
+        logger.warning("status: failed to query fixtures: %s", e)
+
+    return _json_200({
+        "prediction": prediction_status,
+        "queue": queue_status,
+        "teams": teams_status,
+        "fixtures": fixtures_status,
+    })
 
 
 def _ensure_cosmos_containers() -> tuple[Any, Any, Any, Any, Any]:
@@ -549,6 +619,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
         if route == "accuracy":
             return _handle_accuracy(scores_container)
+
+        if route == "status":
+            queue_client, poison_client = get_status_queue_clients()
+            return _handle_status(
+                teams_container, fixtures_container, predictions_container,
+                queue_client, poison_client,
+            )
 
         if route == "usage":
             return _handle_usage(usage_container)
