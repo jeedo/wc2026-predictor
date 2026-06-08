@@ -132,11 +132,8 @@ def get_queue_client() -> QueueClient:
 # Main entry point
 # ---------------------------------------------------------------------------
 
-async def main(mytimer: func.TimerRequest) -> None:
-    logger.info("fn_ingest starting (timer trigger)")
-
-    if mytimer.past_due:
-        logger.warning("Timer trigger is past due")
+async def main(msg: func.QueueMessage) -> None:
+    logger.info("fn_ingest starting (queue trigger) payload=%s", msg.get_body().decode()[:200])
 
     try:
         teams_container, fixtures_container = get_containers()
