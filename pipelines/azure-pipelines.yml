@@ -29,6 +29,18 @@ stages:
           vmImage: ubuntu-latest
         steps:
           - task: AzureCLI@2
+            displayName: 'Register resource providers'
+            inputs:
+              azureSubscription: $(azureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                set -euo pipefail
+                az provider register --namespace Microsoft.Logic --wait
+                az provider register --namespace Microsoft.OperationalInsights --wait
+                echo "Resource providers registered"
+
+          - task: AzureCLI@2
             displayName: 'Deploy main.bicep'
             name: BicepOutput
             inputs:
