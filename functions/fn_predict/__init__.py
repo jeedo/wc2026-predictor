@@ -371,7 +371,10 @@ async def _main_async(msg: func.QueueMessage) -> None:
             "groups": predictions,
         }
         await upsert_item(predictions_container, prediction_doc)
-        logger.info("Wrote %d group predictions for matchday %s", len(predictions), matchday)
+        logger.info(
+            "Wrote %d group predictions: id=%s matchday=%s generatedAt=%s",
+            len(predictions), prediction_doc["id"], matchday, now,
+        )
         track_event("fn_predict/prediction_written", {
             "matchday": str(matchday),
             "groups_count": str(len(predictions)),

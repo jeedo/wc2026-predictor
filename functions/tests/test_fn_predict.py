@@ -431,3 +431,42 @@ async def test_news_served_from_cache():
 
     mock_search.assert_not_called()
     assert result["Germany"] == ["cached headline"]
+
+
+# ---------------------------------------------------------------------------
+# Observability logging (issue #23)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_predict_logs_doc_id_and_matchday(caplog):
+    """fn_predict logs doc id='predictions-all' and matchday at INFO on every write."""
+    import logging
+
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(
+        return_value=_async_iter([_make_team("A", "Germany")])
+    )
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.query_items = MagicMock(return_value=_async_iter([]))
+    mock_predictions_container = MagicMock()
+    mock_predictions_container.upsert_item = AsyncMock()
+    mock_claude, _ = _make_claude_mock()
+
+    queue_msg = MagicMock()
+    queue_msg.get_body.return_value = json.dumps({"matchday": 1, "fixtureId": None}).encode()
+
+    with (
+        patch("fn_predict.get_containers", return_value=(
+            mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
+        )),
+        patch("fn_predict.get_news_container", return_value=None),
+        patch("fn_predict.get_anthropic_client", return_value=mock_claude),
+        caplog.at_level(logging.INFO, logger="fn_predict"),
+    ):
+        await _main_async(queue_msg)
+
+    messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
+    assert any("predictions-all" in m for m in messages), \
+        f"Expected INFO log with 'predictions-all', got: {messages}"
+    assert any("matchday" in m.lower() and "1" in m for m in messages), \
+        f"Expected INFO log with matchday=1, got: {messages}"

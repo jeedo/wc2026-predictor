@@ -75,6 +75,15 @@ def _handle_predictions(predictions_container: Any) -> func.HttpResponse:
     if not docs:
         return _json_404("No predictions available")
     doc = max(docs, key=lambda d: d.get("generatedAt", ""))
+    if len(docs) > 1:
+        logger.warning(
+            "Found %d prediction docs for id='predictions-all' — returning newest (generatedAt=%s matchday=%s)",
+            len(docs), doc.get("generatedAt"), doc.get("matchday"),
+        )
+    logger.info(
+        "Serving prediction doc generatedAt=%s matchday=%s groups=%d",
+        doc.get("generatedAt"), doc.get("matchday"), len(doc.get("groups", [])),
+    )
     return _json_200(doc)
 
 
@@ -469,7 +478,7 @@ def _handle_predictions_trigger(
 
     message = json.dumps({"matchday": matchday, "fixtureId": None}).encode()
     queue_client.send_message(message)
-    logger.info("Enqueued prediction trigger for matchday %s", matchday)
+    logger.info("Enqueued prediction trigger: matchday=%s message=%s", matchday, message.decode())
 
     return _json_200({"status": "queued", "matchday": matchday})
 
