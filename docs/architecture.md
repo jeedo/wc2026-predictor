@@ -26,7 +26,7 @@ The FIFA World Cup 2026 group stage features 48 teams across 12 groups (A–L), 
 |--------------|------------------------------------------|---------------------------------------------------------------------------------|
 | Frontend     | Azure Static Web Apps (React)            | Free hobby tier; deploys from Azure DevOps; no server management                |
 | API Layer    | Azure Functions — HTTP Trigger (Python)  | Serverless; 1M free executions/month; no server management                      |
-| Ingestion    | Azure Functions — Timer Trigger (Python) | Cron-scheduled every 6h during tournament window; zero cost at this scale       |
+| Ingestion    | Azure Functions — Queue Trigger (Python) | Triggered by POST /api/ingest via Storage Queue; decoupled from HTTP response   |
 | Prediction   | Azure Functions — Queue Trigger (Python) | Triggered by fn-ingest via Storage Queue when matches finish; event-driven      |
 | Event Bus    | Azure Queue Storage                      | Free (bundled with Functions storage account); decouples ingest from prediction |
 | Database     | Azure Cosmos DB — NoSQL API              | Permanent free tier: 1,000 RU/s + 25GB; schema-free JSON fits team/fixture data |
@@ -49,7 +49,7 @@ The pipeline runs in three layers: ingestion (football-data.org → Cosmos DB), 
 
 ```
 Key Vault          →  (managed identity)      →  fn-ingest, fn-predict, fn-api
-football-data.org  →  fn-ingest (Timer, 6h)   →  Cosmos DB
+football-data.org  →  fn-ingest (Queue)        →  Cosmos DB
                                                →  Storage Queue (on match finish)
 Storage Queue      →  fn-predict (Queue)       →  Claude API  →  Cosmos DB
 Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
@@ -57,14 +57,15 @@ Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
 
 ### 3.2 Azure Functions
 
-#### fn-ingest — Timer Trigger (every 6 hours)
+#### fn-ingest — Queue Trigger (`ingest-trigger` queue)
 
-- Retrieves `APISPORTS_API_KEY` and Cosmos DB connection string from Key Vault via managed identity
-- Calls API-Football v3 (`https://v3.football.api-sports.io`) to fetch current WC fixtures and match results
-- On first run: seeds the `teams` container with all 48 teams, group assignments, FIFA rankings
+- Triggered by `POST /api/ingest` (fn-api enqueues to `ingest-trigger`, returns 202 immediately)
+- Retrieves `FOOTBALL_DATA_API_KEY` and Cosmos DB connection string from Key Vault via managed identity
+- Calls football-data.org to fetch current WC fixtures and group standings
+- On first run: seeds the `teams` container with all 48 teams and group assignments derived from standings
 - Upserts latest fixture and result data into the `fixtures` Cosmos DB container
-- After each upsert, compares incoming `status` against the previously stored value; if any fixture transitions to `FINISHED`, enqueues a **Base64-encoded** JSON message `{"matchday": N, "fixtureId": null}` to the `predict-trigger` Storage Queue — Base64 encoding is required because the Azure Functions queue trigger is configured with `MessageEncoding: Base64`
-- Runs only during the tournament window (June 12 – July 2) to conserve executions
+- After each upsert, compares incoming `status` against the previously stored value; if any fixture transitions to `FINISHED`, enqueues a **Base64-encoded** JSON message `{"matchday": N, "fixtureId": M}` to the `predict-trigger` Storage Queue — Base64 encoding is required because the Azure Functions queue trigger is configured with `MessageEncoding: Base64`
+- Logs group assignment counts, fixture upsert counts, and enqueue events for observability
 
 #### fn-predict — Queue Trigger (`predict-trigger` queue)
 

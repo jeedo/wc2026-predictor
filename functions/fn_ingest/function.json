@@ -2,10 +2,11 @@
   "scriptFile": "__init__.py",
   "bindings": [
     {
-      "name": "mytimer",
-      "type": "timerTrigger",
+      "name": "msg",
+      "type": "queueTrigger",
       "direction": "in",
-      "schedule": "0 0 */6 * * *"
+      "queueName": "ingest-trigger",
+      "connection": "AzureWebJobsStorage"
     }
   ]
 }
