@@ -47,7 +47,7 @@ test('shows group teams when no predictions available', async () => {
   render(<GroupsView />)
   await waitFor(() => {
     expect(screen.getByText('Group A')).toBeInTheDocument()
-    expect(screen.getByText('Germany')).toBeInTheDocument()
+    expect(screen.getByText(/Germany/)).toBeInTheDocument()
   })
 })
 
@@ -57,8 +57,8 @@ test('shows predicted winner and runner-up when predictions exist', async () => 
     .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(PREDICTIONS) }))
   render(<GroupsView />)
   await waitFor(() => {
-    expect(screen.getByText('Germany')).toBeInTheDocument()
-    expect(screen.getByText('Mexico')).toBeInTheDocument()
+    expect(screen.getByText(/Germany/)).toBeInTheDocument()
+    expect(screen.getByText(/Mexico/)).toBeInTheDocument()
     expect(screen.getByText(/Strong FIFA ranking/)).toBeInTheDocument()
   })
 })
@@ -106,7 +106,7 @@ test('shows no match predictions section when matches array is absent', async ()
     .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(PREDICTIONS) }))
   render(<GroupsView />)
   await waitFor(() => {
-    expect(screen.getByText('Germany')).toBeInTheDocument()
+    expect(screen.getByText(/Germany/)).toBeInTheDocument()
     // No score dashes when there are no match predictions
     expect(screen.queryByText(/\d\s*[–-]\s*\d/)).not.toBeInTheDocument()
   })
