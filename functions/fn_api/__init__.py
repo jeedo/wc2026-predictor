@@ -74,7 +74,8 @@ def _handle_predictions(predictions_container: Any) -> func.HttpResponse:
     )
     if not docs:
         return _json_404("No predictions available")
-    return _json_200(docs[0])
+    doc = max(docs, key=lambda d: d.get("generatedAt", ""))
+    return _json_200(doc)
 
 
 def _handle_fixtures(
@@ -97,7 +98,7 @@ def _handle_fixtures(
             "SELECT * FROM c WHERE c.id = 'predictions-all'",
         )
         if prediction_docs:
-            pred_doc = prediction_docs[0]
+            pred_doc = max(prediction_docs, key=lambda d: d.get("generatedAt", ""))
             groups = pred_doc.get("groups", [])
             logger.info("Found predictions document with %d groups", len(groups))
 
