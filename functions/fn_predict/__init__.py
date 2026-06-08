@@ -365,7 +365,7 @@ async def _main_async(msg: func.QueueMessage) -> None:
 
         now = datetime.now(timezone.utc).isoformat()
         prediction_doc: dict[str, Any] = {
-            "id": f"prediction-md{matchday}",
+            "id": "predictions-all",
             "matchday": matchday,
             "generatedAt": now,
             "groups": predictions,
