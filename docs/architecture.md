@@ -26,7 +26,8 @@ The FIFA World Cup 2026 group stage features 48 teams across 12 groups (A–L), 
 |--------------|------------------------------------------|---------------------------------------------------------------------------------|
 | Frontend     | Azure Static Web Apps (React)            | Free hobby tier; deploys from Azure DevOps; no server management                |
 | API Layer    | Azure Functions — HTTP Trigger (Python)  | Serverless; 1M free executions/month; no server management                      |
-| Ingestion    | Azure Functions — Queue Trigger (Python) | Triggered by POST /api/ingest via Storage Queue; decoupled from HTTP response   |
+| Scheduling   | Azure Logic Apps (Consumption)           | 6-hour recurrence trigger; independent of Function App host; ~240 actions/month |
+| Ingestion    | Azure Functions — Queue Trigger (Python) | Triggered by Logic App → POST /api/ingest → Storage Queue; decoupled            |
 | Prediction   | Azure Functions — Queue Trigger (Python) | Triggered by fn-ingest via Storage Queue when matches finish; event-driven      |
 | Event Bus    | Azure Queue Storage                      | Free (bundled with Functions storage account); decouples ingest from prediction |
 | Database     | Azure Cosmos DB — NoSQL API              | Permanent free tier: 1,000 RU/s + 25GB; schema-free JSON fits team/fixture data |
@@ -49,9 +50,10 @@ The pipeline runs in three layers: ingestion (football-data.org → Cosmos DB), 
 
 ```
 Key Vault          →  (managed identity)      →  fn-ingest, fn-predict, fn-api
-football-data.org  →  fn-ingest (Queue)        →  Cosmos DB
-                                               →  Storage Queue (on match finish)
-Storage Queue      →  fn-predict (Queue)       →  Claude API  →  Cosmos DB
+Logic App (6h)     →  POST /api/ingest        →  ingest-trigger Queue
+ingest-trigger     →  fn-ingest (Queue)        →  football-data.org  →  Cosmos DB
+                                               →  predict-trigger Queue (on match finish)
+predict-trigger    →  fn-predict (Queue)       →  Claude API  →  Cosmos DB
 Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
 ```
 
@@ -271,6 +273,7 @@ A group is scored as correct only when **both** predicted winner and runner-up m
 | Azure Cosmos DB        | 1,000 RU/s + 25GB (permanent)   | <1GB, <200 RU/s       | $0.00     |
 | Azure Functions        | 1M executions/month (permanent) | ~700 executions total | $0.00     |
 | Azure Static Web Apps  | Free hobby tier (permanent)     | Personal project      | $0.00     |
+| Azure Logic Apps       | 4,000 actions/month free        | ~240 actions/month    | $0.00     |
 | Claude API (Haiku 4.5) | Pay-per-use                     | ~36 prediction calls  | ~$0.14    |
 | API-Football           | 100 req/day free                | ~12 calls/day (~250 total) | $0.00 |
 | **Total**              |                                 |                       | **~$0.14** |
@@ -279,11 +282,14 @@ A group is scored as correct only when **both** predicted winner and runner-up m
 
 ## Scheduling
 
-| Function     | Schedule                             | Purpose                                                         |
+| Trigger      | Schedule                             | Purpose                                                         |
 |--------------|--------------------------------------|-----------------------------------------------------------------|
-| `fn-ingest`  | Every 6 hours, June 12 – July 2      | Fetch latest match results and standings from football-data.org |
+| Logic App    | Every 6 hours (independent of host)  | POSTs to `POST /api/ingest`; wakes fn-ingest reliably regardless of Function App cold-start state |
+| `fn-ingest`  | Queue Trigger (`ingest-trigger`)     | Fetch latest match results and standings; enqueue predict-trigger on FINISHED matches |
 | `fn-predict` | On match finish OR on-demand HTTP    | Regenerate predictions when fn-ingest detects a FINISHED match, or when `POST /api/predictions/trigger` is called (pre-tournament) |
 | `fn-api`     | On-demand HTTP                       | Serve frontend requests; no schedule                            |
+
+**Why Logic Apps instead of Function Timer Trigger:** On the Azure Functions Consumption Plan, a low-traffic app stays cold between HTTP requests and can miss scheduled timer fires (the scale controller wakes the host, but if it shuts down before the cron slot, the fire is missed). Logic Apps Consumption tier runs its recurrence trigger independently of the Function App host — it simply makes an HTTP call when the timer fires. At 4 runs/day × 2 actions/run = ~240 actions/month (well within the 4,000/month free tier).
 
 -----
 
