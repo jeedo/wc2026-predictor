@@ -324,10 +324,12 @@ def _ensure_cosmos_containers() -> tuple[Any, Any, Any, Any, Any]:
 
 def _handle_ingest(req: func.HttpRequest) -> func.HttpResponse:
     """Enqueue an ingest job and return 202 immediately."""
+    import uuid
     queue = get_ingest_queue_client()
-    message = json.dumps({}).encode()
+    correlation_id = str(uuid.uuid4())
+    message = json.dumps({"correlationId": correlation_id}).encode()
     queue.send_message(message)
-    logger.info("Enqueued ingest trigger to ingest-trigger queue: payload=%s", message.decode())
+    logger.info("Enqueued ingest trigger: correlationId=%s", correlation_id)
     return func.HttpResponse(
         body=json.dumps({"status": "queued"}),
         status_code=202,
@@ -445,9 +447,11 @@ def _handle_predictions_trigger(
             mimetype="application/json",
         )
 
-    message = json.dumps({"matchday": matchday, "fixtureId": None}).encode()
+    import uuid
+    correlation_id = str(uuid.uuid4())
+    message = json.dumps({"matchday": matchday, "fixtureId": None, "correlationId": correlation_id}).encode()
     queue_client.send_message(message)
-    logger.info("Enqueued prediction trigger: matchday=%s message=%s", matchday, message.decode())
+    logger.info("Enqueued prediction trigger: matchday=%s correlationId=%s", matchday, correlation_id)
 
     return _json_200({"status": "queued", "matchday": matchday})
 

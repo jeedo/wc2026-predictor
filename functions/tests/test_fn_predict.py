@@ -470,3 +470,39 @@ async def test_predict_logs_doc_id_and_matchday(caplog):
         f"Expected INFO log with 'predictions-all', got: {messages}"
     assert any("matchday" in m.lower() and "1" in m for m in messages), \
         f"Expected INFO log with matchday=1, got: {messages}"
+
+
+# ---------------------------------------------------------------------------
+# Correlation ID
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_predict_logs_correlation_id(caplog):
+    """fn_predict logs the correlationId from the queue message."""
+    import logging
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([]))
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.query_items = MagicMock(return_value=_async_iter([]))
+    mock_predictions_container = MagicMock()
+    mock_predictions_container.query_items = MagicMock(return_value=_async_iter([]))
+    mock_predictions_container.upsert_item = AsyncMock()
+    mock_claude, _ = _make_claude_mock()
+
+    queue_msg = MagicMock()
+    queue_msg.get_body.return_value = json.dumps(
+        {"matchday": 1, "fixtureId": None, "correlationId": "corr-xyz-5678"}
+    ).encode()
+
+    with (
+        patch("fn_predict.get_containers", return_value=(
+            mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
+        )),
+        patch("fn_predict.get_news_container", return_value=None),
+        patch("fn_predict.get_anthropic_client", return_value=mock_claude),
+        caplog.at_level(logging.INFO, logger="fn_predict"),
+    ):
+        await _main_async(queue_msg)
+
+    assert any("corr-xyz-5678" in r.message for r in caplog.records), \
+        "fn_predict must log the correlationId from the queue message"
