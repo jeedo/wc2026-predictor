@@ -51,6 +51,11 @@ resource predictQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@20
   name: 'predict-trigger'
 }
 
+resource ingestQueue 'Microsoft.Storage/storageAccounts/queueServices/queues@2023-01-01' = {
+  parent: queueService
+  name: 'ingest-trigger'
+}
+
 // ---------------------------------------------------------------------------
 // Cosmos DB — NoSQL API, permanent free tier
 // ---------------------------------------------------------------------------
@@ -143,7 +148,20 @@ resource newsContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabases/conta
 }
 
 // ---------------------------------------------------------------------------
-// Application Insights
+// Log Analytics Workspace (backing store for workspace-based App Insights
+// and Logic App diagnostic logs)
+// ---------------------------------------------------------------------------
+resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
+  name: 'law-wc2026-${suffix}'
+  location: location
+  properties: {
+    sku: { name: 'PerGB2018' }
+    retentionInDays: 30
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Application Insights (workspace-based)
 // ---------------------------------------------------------------------------
 resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   name: 'appinsights-wc2026-${suffix}'
@@ -152,6 +170,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   properties: {
     Application_Type: 'web'
     RetentionInDays: 30
+    WorkspaceResourceId: logAnalyticsWorkspace.id
   }
 }
 
@@ -307,6 +326,64 @@ resource staticWebApp 'Microsoft.Web/staticSites@2023-01-01' = {
 }
 
 // ---------------------------------------------------------------------------
+// Logic App: fire POST /api/ingest every 6 hours
+// POST /api/ingest returns 202 immediately (fn_ingest processes async via queue),
+// so the HTTP action completes well within Logic Apps' 120-second timeout.
+// ---------------------------------------------------------------------------
+resource ingestTriggerLogicApp 'Microsoft.Logic/workflows@2019-05-01' = {
+  name: 'logic-wc2026-ingest-${suffix}'
+  location: location
+  properties: {
+    state: 'Enabled'
+    definition: {
+      '$schema': 'https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#'
+      contentVersion: '1.0.0.0'
+      parameters: {}
+      triggers: {
+        recurrence: {
+          type: 'Recurrence'
+          recurrence: {
+            frequency: 'Hour'
+            interval: 6
+            startTime: '2026-06-05T00:00:00Z'
+          }
+        }
+      }
+      actions: {
+        trigger_ingest: {
+          type: 'Http'
+          inputs: {
+            method: 'POST'
+            uri: 'https://${functionApp.properties.defaultHostName}/api/ingest'
+            retryPolicy: {
+              type: 'fixed'
+              count: 3
+              interval: 'PT1M'
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// Route WorkflowRuntime logs to the same Log Analytics workspace as App Insights.
+// Query with: AzureDiagnostics | where ResourceProvider == "MICROSOFT.LOGIC"
+resource logicAppDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: 'diag-logic-ingest-trigger'
+  scope: ingestTriggerLogicApp
+  properties: {
+    workspaceId: logAnalyticsWorkspace.id
+    logs: [
+      {
+        category: 'WorkflowRuntime'
+        enabled: true
+      }
+    ]
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Outputs
 // ---------------------------------------------------------------------------
 output functionAppName string = functionApp.name
@@ -315,3 +392,5 @@ output keyVaultUri string = keyVault.properties.vaultUri
 output cosmosDatabaseName string = cosmosDatabase.name
 output appInsightsInstrumentationKey string = appInsights.properties.InstrumentationKey
 output appInsightsName string = appInsights.name
+output logAnalyticsWorkspaceName string = logAnalyticsWorkspace.name
+output logicAppName string = ingestTriggerLogicApp.name
