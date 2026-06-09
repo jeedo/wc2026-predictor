@@ -1,6 +1,13 @@
 """Group assignment fetching from Football Data API standings."""
+import asyncio
+import logging
 from typing import Any
+
 import httpx
+
+from shared.football_data import _TRANSIENT_ERRORS
+
+logger = logging.getLogger(__name__)
 
 
 async def fetch_groups_from_standings(api_key: str) -> dict[str, str]:
@@ -11,13 +18,25 @@ async def fetch_groups_from_standings(api_key: str) -> dict[str, str]:
     authoritative source for group assignments.
     """
     headers = {"X-Auth-Token": api_key}
+    url = "https://api.football-data.org/v4/competitions/2000/standings"
 
+    last_exc: Exception = RuntimeError("unreachable")
     async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            "https://api.football-data.org/v4/competitions/2000/standings",
-            headers=headers,
-            timeout=10
-        )
+        for attempt in range(3):
+            try:
+                resp = await client.get(url, headers=headers, timeout=10)
+                break
+            except _TRANSIENT_ERRORS as exc:
+                last_exc = exc
+                if attempt < 2:
+                    delay = 2 ** (attempt + 1)
+                    logger.warning(
+                        "Transient error on attempt %d/3, retrying in %ds: %s",
+                        attempt + 1, delay, exc,
+                    )
+                    await asyncio.sleep(delay)
+        else:
+            raise last_exc
 
     if resp.status_code != 200:
         raise ValueError(f"Failed to fetch standings: {resp.status_code}")
@@ -29,7 +48,6 @@ async def fetch_groups_from_standings(api_key: str) -> dict[str, str]:
 
     for standing in standings:
         group_name = standing.get("group", "")
-        # Extract letter from "Group A", "Group B", etc.
         group_letter = group_name.replace("Group ", "").strip()
 
         table = standing.get("table", [])
