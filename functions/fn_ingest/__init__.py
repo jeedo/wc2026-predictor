@@ -135,6 +135,14 @@ def get_queue_client() -> QueueClient:
 async def main(msg: func.QueueMessage) -> None:
     logger.info("fn_ingest starting (queue trigger) payload=%s", msg.get_body().decode()[:200])
 
+    payload: dict = {}
+    try:
+        payload = json.loads(msg.get_body().decode())
+    except Exception:
+        pass
+    correlation_id: str = payload.get("correlationId") or str(__import__("uuid").uuid4())
+    logger.info("fn_ingest correlationId=%s", correlation_id)
+
     try:
         teams_container, fixtures_container = get_containers()
         queue = get_queue_client()
@@ -234,7 +242,7 @@ async def main(msg: func.QueueMessage) -> None:
 
                 if _should_enqueue(prev_status, doc["status"]):
                     message = json.dumps(
-                        {"matchday": matchday, "fixtureId": doc["fixtureId"]}
+                        {"matchday": matchday, "fixtureId": doc["fixtureId"], "correlationId": correlation_id}
                     ).encode()
                     await queue.send_message(message)
                     total_enqueued += 1

@@ -285,7 +285,8 @@ async def _main_async(msg: func.QueueMessage) -> None:
     try:
         payload = json.loads(msg.get_body().decode())
         matchday = payload["matchday"]
-        logger.info("Generating predictions for matchday %s", matchday)
+        correlation_id = payload.get("correlationId", "unknown")
+        logger.info("Generating predictions for matchday %s correlationId=%s", matchday, correlation_id)
         track_event("fn_predict/started", {"matchday": str(matchday)})
 
         stage = "containers"

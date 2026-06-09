@@ -444,6 +444,55 @@ def test_trigger_logs_enqueued_message(caplog):
 
 
 
+def test_ingest_message_contains_correlation_id():
+    """POST /api/ingest enqueues a message containing a correlationId."""
+    req = _make_request(method="POST", url="http://localhost/api/ingest")
+    mock_queue = MagicMock()
+    containers = _mock_containers()
+
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_ingest_queue_client", return_value=mock_queue):
+            api_main(req)
+
+    msg = json.loads(mock_queue.send_message.call_args[0][0])
+    assert "correlationId" in msg, "ingest queue message must include correlationId"
+    assert len(msg["correlationId"]) == 36, "correlationId should be a UUID"
+
+
+def test_predictions_trigger_message_contains_correlation_id():
+    """POST /api/predictions/trigger enqueues a message containing a correlationId."""
+    req = _make_request(
+        method="POST",
+        url="http://localhost/api/predictions/trigger",
+        body=json.dumps({"matchday": 1}).encode(),
+    )
+    mock_queue = MagicMock()
+    containers = _mock_containers()
+
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_queue_client", return_value=mock_queue):
+            api_main(req)
+
+    msg = json.loads(mock_queue.send_message.call_args[0][0])
+    assert "correlationId" in msg, "predict-trigger message must include correlationId"
+    assert len(msg["correlationId"]) == 36, "correlationId should be a UUID"
+
+
+def test_ingest_logs_correlation_id(caplog):
+    """POST /api/ingest logs the correlationId it generates."""
+    import logging
+    req = _make_request(method="POST", url="http://localhost/api/ingest")
+    containers = _mock_containers()
+
+    with patch("fn_api.get_containers", return_value=containers):
+        with patch("fn_api.get_ingest_queue_client", return_value=MagicMock()):
+            with caplog.at_level(logging.INFO, logger="fn_api"):
+                api_main(req)
+
+    assert any("correlationId" in r.message for r in caplog.records), \
+        "Expected INFO log containing correlationId"
+
+
 def test_response_shape_accuracy():
     """Verify accuracy response includes per-group breakdown."""
     req = _make_request(url="http://localhost/api/accuracy")

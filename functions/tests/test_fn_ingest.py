@@ -269,3 +269,81 @@ def test_api_ingest_logs_enqueue(caplog):
     messages = [r.message for r in caplog.records if r.levelno == logging.INFO]
     assert any("ingest" in m.lower() and ("enqueue" in m.lower() or "queue" in m.lower()) for m in messages), \
         f"Expected INFO log about enqueueing ingest, got: {messages}"
+
+
+# ---------------------------------------------------------------------------
+# Correlation ID propagation
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ingest_logs_correlation_id_from_message(caplog):
+    """fn_ingest logs the correlationId extracted from the queue message."""
+    import logging
+    payload = json.dumps({"correlationId": "test-corr-id-1234"}).encode()
+    msg = MagicMock(spec=func.QueueMessage)
+    msg.get_body.return_value = payload
+
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([1]))
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.read_item = AsyncMock(side_effect=Exception("not found"))
+    mock_fixtures_container.upsert_item = AsyncMock()
+
+    with (
+        patch("fn_ingest.get_containers", return_value=(mock_teams_container, mock_fixtures_container)),
+        patch("fn_ingest.get_queue_client", return_value=AsyncMock()),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_matches_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
+        caplog.at_level(logging.INFO, logger="fn_ingest"),
+    ):
+        await ingest_main(msg)
+
+    assert any("test-corr-id-1234" in m for m in [r.message for r in caplog.records]), \
+        "fn_ingest must log the correlationId from the message"
+
+
+@pytest.mark.asyncio
+async def test_ingest_predict_trigger_contains_correlation_id():
+    """When fn_ingest enqueues a predict-trigger, it forwards the correlationId."""
+    payload = json.dumps({"correlationId": "corr-abc-999"}).encode()
+    msg = MagicMock(spec=func.QueueMessage)
+    msg.get_body.return_value = payload
+
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([1]))
+
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.read_item = AsyncMock(return_value={"status": "NS"})
+    mock_fixtures_container.upsert_item = AsyncMock()
+
+    mock_queue = AsyncMock()
+    mock_queue.send_message = AsyncMock()
+
+    finished_fixture = {
+        "id": 101, "utcDate": "2026-06-12T15:00:00Z", "status": "FINISHED",
+        "matchday": 1,
+        "homeTeam": {"id": 1, "name": "Germany"}, "awayTeam": {"id": 2, "name": "Mexico"},
+        "score": {"fullTime": {"home": 2, "away": 0}},
+    }
+
+    async def _ft_stub(_api, _http, matchday):
+        return [finished_fixture] if matchday == 1 else []
+
+    with (
+        patch("fn_ingest.get_containers", return_value=(mock_teams_container, mock_fixtures_container)),
+        patch("fn_ingest.get_queue_client", return_value=mock_queue),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_matches_fd", side_effect=_ft_stub),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
+    ):
+        await ingest_main(msg)
+
+    mock_queue.send_message.assert_called_once()
+    sent = json.loads(mock_queue.send_message.call_args[0][0])
+    assert sent.get("correlationId") == "corr-abc-999", \
+        f"predict-trigger message must forward correlationId, got: {sent}"

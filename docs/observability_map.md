@@ -48,9 +48,34 @@ Auto-created by Azure to back `appinsights-wc2026`. Will be removed automaticall
 
 ---
 
+## Correlation IDs
+
+Every queue message in the pipeline carries a `correlationId` (UUID). This allows a single Kusto query to trace a full run from trigger to prediction write, since Azure Storage Queue does not propagate W3C trace context automatically.
+
+**How it flows:**
+
+```
+POST /api/ingest
+  → fn_api generates correlationId, logs it, sends {"correlationId":"<id>"} to ingest-trigger
+    → fn_ingest reads correlationId, logs "fn_ingest correlationId=<id>", forwards it in every predict-trigger message
+      → fn_predict reads correlationId, logs "Generating predictions ... correlationId=<id>"
+```
+
+`POST /api/predictions/trigger` follows the same pattern directly into predict-trigger.
+
+---
+
 ## Useful Queries
 
 All queries run against `law-wc2026-zwn7h5hfxftt2` (workspace ID `73c43f55-5a43-4843-a85a-87baec2305d9`).
+
+### Trace a single run end-to-end by correlationId
+```kusto
+traces
+| where message has "correlationId=<paste-id-here>"
+| order by timestamp asc
+| project timestamp, operation_Name, message
+```
 
 ### Function App traces (fn_ingest, fn_predict, fn_api)
 ```kusto
@@ -86,7 +111,8 @@ AzureDiagnostics
 | order by TimeGenerated desc
 ```
 
-### End-to-end: correlate Logic App fire with fn_ingest run
+### End-to-end: correlate Logic App fire with fn_ingest run (timestamp join)
+Use when you don't have a correlationId (e.g. investigating a past midnight run):
 ```kusto
 let logicFires = AzureDiagnostics
     | where ResourceProvider == "MICROSOFT.LOGIC"
