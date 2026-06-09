@@ -107,7 +107,7 @@ logicFires
 
 1. **Region mismatch:** Function App is in `westus2`; all observability resources (App Insights, Log Analytics, Logic App) are in `eastus`. Cross-region telemetry ingestion works. Intentional per Bicep (`functionLocation` param) due to Y1 Consumption quota availability in westus2.
 
-2. **23 stale poison messages in `predict-trigger-poison`:** Old-format messages `{"matchday":1,"fixtureId":null}` from before the fn_predict refactor. They failed and landed in the poison queue but do not affect current operation. Should be purged manually.
+2. ~~**23 stale poison messages in `predict-trigger-poison`**~~ — Purged 2026-06-09. Were old-format messages `{"matchday":1,"fixtureId":null}` from before the fn_predict refactor.
 
 3. **`CLAUDE.md` debugging examples used wrong App Insights name** — fixed to use appId `188592ac-7e4e-4efc-bbab-9b0e22255130` directly. `debug/get_logs.py` already uses the correct appId.
 
