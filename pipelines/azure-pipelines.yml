@@ -4,7 +4,7 @@ trigger:
       - main
 
 variables:
-  - group: wc2026-secrets          # holds: APISPORTS_API_KEY, ANTHROPIC_API_KEY
+  - group: wc2026-secrets          # holds: APISPORTS_API_KEY, ANTHROPIC_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
   - name: azureSubscription
     value: wc2026-service-connection
   - name: resourceGroup
@@ -28,6 +28,18 @@ stages:
         pool:
           vmImage: ubuntu-latest
         steps:
+          - task: SendTelegramNotification@1
+            displayName: 'Notify Telegram: pipeline started'
+            inputs:
+              botToken: $(TELEGRAM_BOT_TOKEN)
+              chats: $(TELEGRAM_CHAT_ID)
+              buildNumber: true
+              buildQueuedBy: true
+              message: |
+                🚀 <b>Pipeline started</b>
+                Branch: <code>$(Build.SourceBranchName)</code>
+                Commit: <code>$(Build.SourceVersion)</code>
+
           - task: AzureCLI@2
             displayName: 'Deploy main.bicep'
             name: BicepOutput
@@ -107,6 +119,15 @@ stages:
 
                 echo "Key Vault secrets provisioned: apisports-api-key, anthropic-api-key, cosmos-connection-string"
 
+          - task: SendTelegramNotification@1
+            displayName: 'Notify Telegram: infrastructure stage result'
+            condition: always()
+            inputs:
+              botToken: $(TELEGRAM_BOT_TOKEN)
+              chats: $(TELEGRAM_CHAT_ID)
+              taskStatus: true
+              message: 'Stage: <b>Deploy Infrastructure</b>'
+
   # ---------------------------------------------------------------------------
   # Stage 2: Functions
   # Packages the Python function app with uv and deploys to Azure Functions.
@@ -155,6 +176,15 @@ stages:
                   --src functions.zip \
                   --build-remote true
 
+          - task: SendTelegramNotification@1
+            displayName: 'Notify Telegram: functions stage result'
+            condition: always()
+            inputs:
+              botToken: $(TELEGRAM_BOT_TOKEN)
+              chats: $(TELEGRAM_CHAT_ID)
+              taskStatus: true
+              message: 'Stage: <b>Deploy Functions</b>'
+
   # ---------------------------------------------------------------------------
   # Stage 3: Frontend
   # Builds the React/Vite app and publishes to Azure Static Web Apps.
@@ -199,6 +229,15 @@ stages:
               output_location: ''
               skip_app_build: true
 
+          - task: SendTelegramNotification@1
+            displayName: 'Notify Telegram: frontend stage result'
+            condition: always()
+            inputs:
+              botToken: $(TELEGRAM_BOT_TOKEN)
+              chats: $(TELEGRAM_CHAT_ID)
+              taskStatus: true
+              message: 'Stage: <b>Deploy Frontend</b>'
+
   # ---------------------------------------------------------------------------
   # Stage 4: Smoke Tests
   # Calls each fn-api endpoint and asserts HTTP 200 / expected shape.
@@ -233,3 +272,51 @@ stages:
             displayName: 'Run smoke_test.py'
             env:
               functionAppName: $(functionAppName)
+
+          - task: SendTelegramNotification@1
+            displayName: 'Notify Telegram: smoke tests result'
+            condition: always()
+            inputs:
+              botToken: $(TELEGRAM_BOT_TOKEN)
+              chats: $(TELEGRAM_CHAT_ID)
+              taskStatus: true
+              message: 'Stage: <b>Smoke Tests</b>'
+
+  # ---------------------------------------------------------------------------
+  # Stage 5: Notify
+  # Sends a final pipeline summary to Telegram regardless of outcome.
+  # ---------------------------------------------------------------------------
+  - stage: notify
+    displayName: 'Notify Pipeline Result'
+    dependsOn:
+      - infra
+      - functions
+      - frontend
+      - smoke
+    condition: always()
+    variables:
+      infraResult:     $[ stageDependencies.infra.BicepDeploy.result ]
+      functionsResult: $[ stageDependencies.functions.FunctionsDeploy.result ]
+      frontendResult:  $[ stageDependencies.frontend.FrontendDeploy.result ]
+      smokeResult:     $[ stageDependencies.smoke.SmokeTest.result ]
+    jobs:
+      - job: SendSummary
+        displayName: 'Send pipeline summary'
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: SendTelegramNotification@1
+            displayName: 'Notify Telegram: pipeline complete'
+            inputs:
+              botToken: $(TELEGRAM_BOT_TOKEN)
+              chats: $(TELEGRAM_CHAT_ID)
+              buildNumber: true
+              buildQueuedBy: true
+              teamUrl: true
+              message: |
+                🏁 <b>Pipeline complete</b>
+
+                Infrastructure: $(infraResult)
+                Functions:      $(functionsResult)
+                Frontend:       $(frontendResult)
+                Smoke Tests:    $(smokeResult)
