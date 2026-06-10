@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { vi } from 'vitest'
+import { vi, beforeEach, afterEach, test, expect } from 'vitest'
 import FixturesView from '../components/FixturesView'
 
 const MD1 = {
@@ -125,5 +125,61 @@ test('shows only kickoff time for upcoming matches without predictions', async (
     // France vs Spain has no predictions, should show kickoff time
     expect(screen.getByText('France')).toBeInTheDocument()
     expect(screen.getByText('Spain')).toBeInTheDocument()
+  })
+})
+
+test('renders Knockout tab button', async () => {
+  render(<FixturesView />)
+  await waitFor(() => {
+    expect(screen.getByRole('tab', { name: /knockout/i })).toBeInTheDocument()
+  })
+})
+
+test('switching to Knockout tab shows coming-soon when no knockout predictions', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation((url) => {
+    if (url.includes('/api/predictions'))
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ matchday: 1, groups: [], knockout: [] }) })
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(MD1) })
+  }))
+
+  const user = userEvent.setup()
+  render(<FixturesView />)
+  await user.click(screen.getByRole('tab', { name: /knockout/i }))
+  await waitFor(() => {
+    expect(screen.getByText(/group stage concludes/i)).toBeInTheDocument()
+  })
+})
+
+test('Knockout tab shows loading then stage sections when predictions exist', async () => {
+  const PREDICTIONS = {
+    matchday: 1, groups: [],
+    knockout: [{ stage: 'LAST_16', matches: [
+      { fixtureId: 5001, stage: 'LAST_16', homeTeam: 'France', awayTeam: 'Brazil',
+        predictedWinner: 'France', predictedHomeScore: 2, predictedAwayScore: 1, confidence: 'high' },
+    ]}],
+  }
+  const STAGE_FIXTURES = {
+    stage: 'LAST_16',
+    fixtures: [
+      { id: 'f-ko-1', fixtureId: 5001, stage: 'LAST_16', matchday: 'LAST_16',
+        homeTeam: 'France', awayTeam: 'Brazil', homeScore: null, awayScore: null,
+        status: 'NS', kickoff: '2026-06-28T18:00:00Z' },
+    ],
+  }
+  vi.stubGlobal('fetch', vi.fn().mockImplementation((url) => {
+    if (url.includes('/api/predictions'))
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(PREDICTIONS) })
+    if (url.includes('/stage/'))
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(STAGE_FIXTURES) })
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(MD1) })
+  }))
+
+  const user = userEvent.setup()
+  render(<FixturesView />)
+  await user.click(screen.getByRole('tab', { name: /knockout/i }))
+
+  // After predictions load the coming-soon message must NOT appear
+  await waitFor(() => {
+    expect(screen.queryByText(/group stage concludes/i)).not.toBeInTheDocument()
   })
 })

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import GroupsView from './components/GroupsView'
 import FixturesView from './components/FixturesView'
+import BracketView from './components/BracketView'
 import AccuracyView from './components/AccuracyView'
 import UsageView from './components/UsageView'
 import './App.css'
@@ -8,6 +9,7 @@ import './App.css'
 const VIEWS = [
   { id: 'groups', label: 'Groups' },
   { id: 'fixtures', label: 'Fixtures' },
+  { id: 'bracket', label: 'Bracket' },
   { id: 'accuracy', label: 'Accuracy' },
   { id: 'usage', label: 'API Usage' },
 ]
@@ -38,6 +40,7 @@ export default function App() {
       <main className="app-main">
         {view === 'groups' && <GroupsView />}
         {view === 'fixtures' && <FixturesView />}
+        {view === 'bracket' && <BracketView />}
         {view === 'accuracy' && <AccuracyView />}
         {view === 'usage' && <UsageView />}
       </main>

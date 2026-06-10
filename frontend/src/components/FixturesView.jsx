@@ -1,8 +1,17 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useFetch } from '../hooks/useFetch'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const MATCHDAYS = [1, 2, 3]
+
+const KNOCKOUT_STAGES = [
+  { key: 'LAST_32',        label: 'Round of 32' },
+  { key: 'LAST_16',        label: 'Round of 16' },
+  { key: 'QUARTER_FINALS', label: 'Quarter-Finals' },
+  { key: 'SEMI_FINALS',    label: 'Semi-Finals' },
+  { key: 'THIRD_PLACE',    label: 'Third Place' },
+  { key: 'FINAL',          label: 'Final' },
+]
 
 function FixtureRow({
   homeTeam,
@@ -22,19 +31,21 @@ function FixtureRow({
   const timeStr = kickoffDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const dateStr = kickoffDate.toLocaleDateString([], { month: 'short', day: 'numeric' })
 
-  const hasPrediction =
-    predictedHomeScore != null && predictedAwayScore != null
+  const hasPrediction = predictedHomeScore != null && predictedAwayScore != null
 
   return (
     <div className={`fixture-row ${status.toLowerCase()}`}>
-      <span className="team home">{homeTeam}</span>
+      <span className="team home">{homeTeam ?? 'TBD'}</span>
       <span className="score">
         {finished || live ? (
           `${homeScore} – ${awayScore}`
         ) : upcoming && hasPrediction ? (
           <div>
             <div className="predicted-score">
-              {predictedHomeScore} – {predictedAwayScore} <span className={`pred-label ${predictedConfidence || ''}`}>{predictedConfidence ? `(pred · ${predictedConfidence})` : '(pred)'}</span>
+              {predictedHomeScore} – {predictedAwayScore}{' '}
+              <span className={`pred-label ${predictedConfidence || ''}`}>
+                {predictedConfidence ? `(pred · ${predictedConfidence})` : '(pred)'}
+              </span>
             </div>
             <div className="kickoff-time">{dateStr} {timeStr}</div>
           </div>
@@ -42,7 +53,7 @@ function FixtureRow({
           <span className="kickoff">{dateStr} {timeStr}</span>
         )}
       </span>
-      <span className="team away">{awayTeam}</span>
+      <span className="team away">{awayTeam ?? 'TBD'}</span>
       <span className={`status-badge ${live ? 'live' : ''}`}>
         {finished ? 'FT' : live ? status : 'Upcoming'}
       </span>
@@ -64,8 +75,65 @@ function MatchdayFixtures({ matchday }) {
   )
 }
 
+function KnockoutStageSection({ stage, predsByFixtureId }) {
+  const { data, loading, error } = useFetch(`${API_BASE}/api/fixtures/stage/${stage.key}`)
+
+  if (loading) return <p className="status">Loading {stage.label}…</p>
+  if (error || !data?.fixtures?.length) return null
+
+  return (
+    <div className="knockout-stage-section">
+      <h3 className="round-label">{stage.label}</h3>
+      <div className="fixtures-list">
+        {data.fixtures.map(f => {
+          const pred = predsByFixtureId[f.fixtureId]
+          return (
+            <FixtureRow
+              key={f.id}
+              {...f}
+              predictedHomeScore={pred?.predictedHomeScore}
+              predictedAwayScore={pred?.predictedAwayScore}
+              predictedConfidence={pred?.confidence}
+            />
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function KnockoutFixtures() {
+  const { data: predData, loading: predLoading } = useFetch(`${API_BASE}/api/predictions`)
+
+  const predsByFixtureId = useMemo(() => {
+    const map = {}
+    predData?.knockout?.forEach(stagePred => {
+      stagePred.matches.forEach(m => { map[m.fixtureId] = m })
+    })
+    return map
+  }, [predData])
+
+  if (predLoading) return <p className="status">Loading…</p>
+
+  if (predData && !predData.knockout?.length) {
+    return (
+      <p className="status">
+        Knockout fixtures will appear here once the group stage concludes (~June 25).
+      </p>
+    )
+  }
+
+  return (
+    <div className="knockout-fixtures">
+      {KNOCKOUT_STAGES.map(stage => (
+        <KnockoutStageSection key={stage.key} stage={stage} predsByFixtureId={predsByFixtureId} />
+      ))}
+    </div>
+  )
+}
+
 export default function FixturesView() {
-  const [matchday, setMatchday] = useState(1)
+  const [tab, setTab] = useState(1)
 
   return (
     <section className="fixtures-view">
@@ -75,15 +143,27 @@ export default function FixturesView() {
           <button
             key={md}
             role="tab"
-            aria-selected={matchday === md}
-            className={`tab-btn ${matchday === md ? 'active' : ''}`}
-            onClick={() => setMatchday(md)}
+            aria-selected={tab === md}
+            className={`tab-btn ${tab === md ? 'active' : ''}`}
+            onClick={() => setTab(md)}
           >
             Matchday {md}
           </button>
         ))}
+        <button
+          role="tab"
+          aria-selected={tab === 'knockout'}
+          className={`tab-btn ${tab === 'knockout' ? 'active' : ''}`}
+          onClick={() => setTab('knockout')}
+        >
+          Knockout
+        </button>
       </div>
-      <MatchdayFixtures matchday={matchday} />
+      {tab === 'knockout' ? (
+        <KnockoutFixtures />
+      ) : (
+        <MatchdayFixtures matchday={tab} />
+      )}
     </section>
   )
 }
