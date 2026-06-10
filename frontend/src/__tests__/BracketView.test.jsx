@@ -1,0 +1,101 @@
+import { render, screen, waitFor } from '@testing-library/react'
+import { vi } from 'vitest'
+import BracketView from '../components/BracketView'
+
+const PRED_WITH_KNOCKOUT = {
+  matchday: 1,
+  groups: [],
+  knockout: [
+    {
+      stage: 'LAST_16',
+      matches: [
+        { fixtureId: 1001, stage: 'LAST_16', homeTeam: 'France', awayTeam: 'Brazil',
+          predictedWinner: 'France', predictedHomeScore: 2, predictedAwayScore: 1, confidence: 'high' },
+        { fixtureId: 1002, stage: 'LAST_16', homeTeam: 'Germany', awayTeam: 'Argentina',
+          predictedWinner: 'Germany', predictedHomeScore: 1, predictedAwayScore: 0, confidence: 'medium' },
+      ],
+    },
+    {
+      stage: 'QUARTER_FINALS',
+      matches: [
+        { fixtureId: 2001, stage: 'QUARTER_FINALS', homeTeam: 'France', awayTeam: 'Germany',
+          predictedWinner: 'France', predictedHomeScore: 2, predictedAwayScore: 0, confidence: 'high' },
+      ],
+    },
+  ],
+}
+
+const PRED_NO_KNOCKOUT = {
+  matchday: 1,
+  groups: [],
+  knockout: [],
+}
+
+afterEach(() => vi.restoreAllMocks())
+
+test('shows heading', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, json: () => Promise.resolve(PRED_WITH_KNOCKOUT),
+  }))
+  render(<BracketView />)
+  await waitFor(() => expect(screen.getByRole('heading', { name: /knockout bracket/i })).toBeInTheDocument())
+})
+
+test('shows round labels when predictions exist', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, json: () => Promise.resolve(PRED_WITH_KNOCKOUT),
+  }))
+  render(<BracketView />)
+  await waitFor(() => {
+    expect(screen.getByText('Round of 16')).toBeInTheDocument()
+    expect(screen.getByText('Quarter-Finals')).toBeInTheDocument()
+  })
+})
+
+test('shows team names from predictions', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, json: () => Promise.resolve(PRED_WITH_KNOCKOUT),
+  }))
+  render(<BracketView />)
+  await waitFor(() => {
+    // France appears in multiple rounds; getAllByText handles that
+    expect(screen.getAllByText('France').length).toBeGreaterThan(0)
+    expect(screen.getByText('Brazil')).toBeInTheDocument()
+  })
+})
+
+test('shows predicted scores', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, json: () => Promise.resolve(PRED_WITH_KNOCKOUT),
+  }))
+  render(<BracketView />)
+  await waitFor(() => {
+    // France vs Brazil: 2-1
+    const twos = screen.getAllByText('2')
+    expect(twos.length).toBeGreaterThan(0)
+  })
+})
+
+test('shows coming-soon message when no knockout predictions', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, json: () => Promise.resolve(PRED_NO_KNOCKOUT),
+  }))
+  render(<BracketView />)
+  await waitFor(() => {
+    expect(screen.getByText(/group stage concludes/i)).toBeInTheDocument()
+  })
+})
+
+test('shows loading state initially', () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+    ok: true, json: () => new Promise(() => {}),
+  }))
+  render(<BracketView />)
+  expect(screen.getByText(/loading/i)).toBeInTheDocument()
+})
+
+test('shows error when fetch fails', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
+  render(<BracketView />)
+  await waitFor(() => expect(screen.getByText(/error/i)).toBeInTheDocument())
+})

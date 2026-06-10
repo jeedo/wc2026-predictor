@@ -2,6 +2,25 @@ import { useFetch } from '../hooks/useFetch'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
+function KnockoutAccuracySection({ knockout }) {
+  if (!knockout || knockout.total === 0) return null
+  const pct = Math.round((knockout.score / knockout.total) * 100)
+  return (
+    <div className="knockout-accuracy">
+      <h2>Knockout Stage</h2>
+      <div className="score-header">
+        <div className="score-display">
+          <span className="score-value">{knockout.score} / {knockout.total}</span>
+          <span className="score-label">knockout matches predicted correctly</span>
+        </div>
+        <div className="score-bar">
+          <div className="score-fill" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ScoreHeader({ score, totalGroups, matchday }) {
   const pct = Math.round((score / totalGroups) * 100)
   return (
@@ -51,6 +70,7 @@ export default function AccuracyView() {
   return (
     <section className="accuracy-view">
       <h1>Prediction Accuracy</h1>
+      <h2>Group Stage</h2>
       <ScoreHeader score={data.score} totalGroups={data.totalGroups} matchday={data.matchday} />
       <table className="accuracy-table">
         <thead>
@@ -65,6 +85,7 @@ export default function AccuracyView() {
           {data.groups.map(g => <GroupRow key={g.group} {...g} />)}
         </tbody>
       </table>
+      <KnockoutAccuracySection knockout={data.knockout} />
     </section>
   )
 }
