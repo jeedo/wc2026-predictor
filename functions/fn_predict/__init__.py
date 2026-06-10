@@ -52,9 +52,28 @@ class GroupPrediction(BaseModel):
     matches: list[PredictedMatch]
 
 
+class KnockoutMatchPrediction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    fixtureId: int
+    stage: str
+    homeTeam: str
+    awayTeam: str
+    predictedWinner: str
+    predictedHomeScore: int
+    predictedAwayScore: int
+    confidence: str  # "high", "medium", "low"
+
+
+class KnockoutPrediction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stage: str
+    matches: list[KnockoutMatchPrediction]
+
+
 class PredictionsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     predictions: list[GroupPrediction]
+    knockout: list[KnockoutPrediction] = []
 
 
 # ---------------------------------------------------------------------------
@@ -182,8 +201,23 @@ def _build_prompt(
     for team in teams:
         groups[team.get("group", "?")].append(team)
 
-    completed = [f for f in fixtures if f.get("status") == "FT"]
-    upcoming = [f for f in fixtures if f.get("status") not in ("FT", "1H", "2H", "HT", "ET", "P")]
+    # Separate group stage from knockout fixtures
+    group_fixtures = [
+        f for f in fixtures
+        if isinstance(f.get("matchday"), int) or f.get("stage") == "GROUP_STAGE" or not f.get("stage")
+    ]
+    knockout_fixtures_all = [
+        f for f in fixtures
+        if f.get("stage") and f.get("stage") != "GROUP_STAGE" and not isinstance(f.get("matchday"), int)
+    ]
+    # Only include knockout fixtures where both teams are known
+    knockout_fixtures = [
+        f for f in knockout_fixtures_all
+        if f.get("homeTeam") not in (None, "TBD", "") and f.get("awayTeam") not in (None, "TBD", "")
+    ]
+
+    completed = [f for f in group_fixtures if f.get("status") == "FT"]
+    upcoming = [f for f in group_fixtures if f.get("status") not in ("FT", "1H", "2H", "HT", "ET", "P")]
 
     team_to_group: dict[str, str] = {t["name"]: t.get("group", "?") for t in teams}
     upcoming_by_group: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -196,12 +230,24 @@ def _build_prompt(
         g = team_to_group.get(f.get("homeTeam", ""), "?")
         completed_by_group[g].append(f)
 
+    has_knockout = bool(knockout_fixtures)
+    knockout_schema_extra = ""
+    if has_knockout:
+        knockout_schema_extra = (
+            ', "knockout": [{"stage": "LAST_32", "matches": ['
+            '{"fixtureId": 0, "stage": "LAST_32", "homeTeam": "...", "awayTeam": "...", '
+            '"predictedWinner": "...", "predictedHomeScore": 0, "predictedAwayScore": 0, '
+            '"confidence": "high|medium|low"}]}]'
+        )
+
     schema = (
         '{"predictions": ['
         '{"group": "A", "winner": "...", "runnerUp": "...", "confidence": "high|medium|low", "reasoning": "...", '
         '"matches": [{"homeTeam": "...", "awayTeam": "...", "matchday": 1, '
         '"predictedHomeScore": 0, "predictedAwayScore": 0, "confidence": "high|medium|low"}]}'
-        ']}'
+        ']'
+        + knockout_schema_extra
+        + '}'
     )
 
     lines = [
@@ -242,6 +288,19 @@ def _build_prompt(
             for f in upcoming_by_group[letter]:
                 lines.append(
                     f"    MD{f['matchday']}: {f['homeTeam']} vs {f['awayTeam']}"
+                )
+
+    if has_knockout:
+        lines.append("\nKNOCKOUT FIXTURES (predict winner and score for each — include in 'knockout' field):")
+        knockout_by_stage: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for f in knockout_fixtures:
+            knockout_by_stage[f.get("stage", "UNKNOWN")].append(f)
+        for stage_name in sorted(knockout_by_stage.keys()):
+            lines.append(f"\n{stage_name}:")
+            for f in knockout_by_stage[stage_name]:
+                kickoff = (f.get("kickoff") or "")[:10]
+                lines.append(
+                    f"  [{f.get('fixtureId')}] {f['homeTeam']} vs {f['awayTeam']} ({kickoff})"
                 )
 
     if news:
@@ -364,12 +423,20 @@ async def _main_async(msg: func.QueueMessage) -> None:
         raw_text = response.content[0].text  # type: ignore[union-attr]
         predictions = _parse_claude_response(raw_text)
 
+        # Parse knockout predictions (empty list if not present)
+        try:
+            full_response = json.loads(raw_text)
+            knockout_predictions: list[dict[str, Any]] = full_response.get("knockout", [])
+        except Exception:
+            knockout_predictions = []
+
         now = datetime.now(timezone.utc).isoformat()
         prediction_doc: dict[str, Any] = {
             "id": "predictions-all",
             "matchday": matchday,
             "generatedAt": now,
             "groups": predictions,
+            "knockout": knockout_predictions,
         }
         await upsert_item(predictions_container, prediction_doc)
         logger.info(

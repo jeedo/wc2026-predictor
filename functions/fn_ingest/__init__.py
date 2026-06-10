@@ -14,7 +14,7 @@ from azure.storage.queue import BinaryBase64EncodePolicy
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.secrets import SecretClient
 
-from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd
+from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd, fetch_knockout_matches_fd
 from shared.cosmos import upsert_item, query_items, read_item
 from shared.usage_tracker import record_call
 from shared.group_derivation import fetch_groups_from_standings
@@ -22,6 +22,7 @@ from shared.group_derivation import fetch_groups_from_standings
 logger = logging.getLogger(__name__)
 
 _MATCHDAYS = [1, 2, 3]
+KNOCKOUT_STAGES = ["LAST_32", "LAST_16", "QUARTER_FINALS", "SEMI_FINALS", "THIRD_PLACE", "FINAL"]
 
 
 # ---------------------------------------------------------------------------
@@ -68,16 +69,24 @@ def _build_fixture_doc(raw: dict[str, Any]) -> dict[str, Any]:
     status_map = {"FINISHED": "FT", "IN_PLAY": "1H", "PAUSED": "HT",
                   "TIMED": "NS", "SCHEDULED": "NS"}
     status_raw = raw.get("status", "NS")
+    stage = raw.get("stage") or "GROUP_STAGE"
+    matchday_raw = raw.get("matchday")
+    matchday = matchday_raw if matchday_raw is not None else stage
+    home_name = (raw.get("homeTeam") or {}).get("name") or "TBD"
+    away_name = (raw.get("awayTeam") or {}).get("name") or "TBD"
+    home_id = (raw.get("homeTeam") or {}).get("id")
+    away_id = (raw.get("awayTeam") or {}).get("id")
     return {
         "id": f"fixture-{raw['id']}",
         "fixtureId": raw["id"],
-        "matchday": raw.get("matchday", 1),
+        "matchday": matchday,
+        "stage": stage,
         "kickoff": raw.get("utcDate", ""),
         "status": status_map.get(status_raw, status_raw),
-        "homeTeam": raw["homeTeam"]["name"],
-        "homeTeamId": raw["homeTeam"]["id"],
-        "awayTeam": raw["awayTeam"]["name"],
-        "awayTeamId": raw["awayTeam"]["id"],
+        "homeTeam": home_name,
+        "homeTeamId": home_id,
+        "awayTeam": away_name,
+        "awayTeamId": away_id,
         "homeScore": ft.get("home"),
         "awayScore": ft.get("away"),
     }
@@ -175,6 +184,15 @@ async def main(msg: func.QueueMessage) -> None:
             await record_call(usage_container, "api-football")
             all_fixtures.extend(raw_fixtures)
 
+        # Fetch knockout stage fixtures
+        logger.info("Fetching knockout stage fixtures...")
+        all_knockout: list[dict] = []
+        for stage in KNOCKOUT_STAGES:
+            raw_knockout = await fetch_knockout_matches_fd(api, http, stage)
+            await record_call(usage_container, "api-football")
+            all_knockout.extend(raw_knockout)
+        logger.info("Fetched %d knockout fixtures across %d stages", len(all_knockout), len(KNOCKOUT_STAGES))
+
         # Seed teams on first run (container empty)
         logger.info("Checking if teams need seeding...")
         existing = await query_items(teams_container, "SELECT VALUE COUNT(1) FROM c")
@@ -253,6 +271,39 @@ async def main(msg: func.QueueMessage) -> None:
                         away_team,
                         matchday,
                     )
+
+        # Upsert knockout fixtures
+        knockout_upserted = 0
+        knockout_enqueued = 0
+        for raw in all_knockout:
+            doc = _build_fixture_doc(raw)
+            fixture_id = doc["id"]
+            partition_key = doc["matchday"]  # stage string for knockout
+            stage_name = doc.get("stage", "UNKNOWN")
+
+            try:
+                prev = await read_item(fixtures_container, fixture_id, partition_key)
+                prev_status = prev.get("status")
+            except Exception:
+                prev_status = None
+
+            await upsert_item(fixtures_container, doc)
+            knockout_upserted += 1
+
+            if _should_enqueue(prev_status, doc["status"]):
+                message = json.dumps(
+                    {"matchday": stage_name, "fixtureId": doc["fixtureId"], "correlationId": correlation_id}
+                ).encode()
+                await queue.send_message(message)
+                knockout_enqueued += 1
+                logger.info(
+                    "Enqueued prediction trigger for knockout %s vs %s (%s)",
+                    doc.get("homeTeam"), doc.get("awayTeam"), stage_name,
+                )
+
+        total_upserted += knockout_upserted
+        total_enqueued += knockout_enqueued
+        logger.info("Knockout ingest: %d fixtures upserted, %d triggers enqueued", knockout_upserted, knockout_enqueued)
 
         logger.info("Ingest complete: %d fixtures upserted, %d prediction triggers enqueued", total_upserted, total_enqueued)
         for matchday in sorted(fixture_summary.keys()):

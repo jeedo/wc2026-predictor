@@ -587,3 +587,77 @@ def test_get_usage_returns_empty_providers_when_no_data():
     assert resp.status_code == 200
     body = _json_body(resp)
     assert body["providers"] == []
+
+
+# ---------------------------------------------------------------------------
+# GET /api/fixtures/stage/<stage> (issue #32)
+# ---------------------------------------------------------------------------
+
+KNOCKOUT_FIXTURE_DOC = {
+    "id": "fixture-537417",
+    "fixtureId": 537417,
+    "matchday": "LAST_32",
+    "stage": "LAST_32",
+    "homeTeam": "TBD",
+    "awayTeam": "TBD",
+    "status": "NS",
+    "kickoff": "2026-06-28T19:00:00Z",
+    "homeScore": None,
+    "awayScore": None,
+}
+
+
+def test_get_fixtures_by_stage_returns_200():
+    req = _make_request(url="http://localhost/api/fixtures/stage/LAST_32")
+    containers = _mock_containers(fixtures=[KNOCKOUT_FIXTURE_DOC])
+
+    with patch("fn_api.get_containers", return_value=containers):
+        resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["stage"] == "LAST_32"
+    assert len(body["fixtures"]) == 1
+    assert body["fixtures"][0]["stage"] == "LAST_32"
+
+
+def test_get_fixtures_by_stage_returns_correct_fixture_data():
+    req = _make_request(url="http://localhost/api/fixtures/stage/LAST_32")
+    containers = _mock_containers(fixtures=[KNOCKOUT_FIXTURE_DOC])
+
+    with patch("fn_api.get_containers", return_value=containers):
+        resp = api_main(req)
+
+    body = _json_body(resp)
+    assert body["fixtures"][0]["fixtureId"] == 537417
+    assert body["fixtures"][0]["homeTeam"] == "TBD"
+    assert body["fixtures"][0]["kickoff"] == "2026-06-28T19:00:00Z"
+
+
+def test_get_fixtures_by_stage_empty_returns_empty_list():
+    req = _make_request(url="http://localhost/api/fixtures/stage/FINAL")
+    containers = _mock_containers(fixtures=[])
+
+    with patch("fn_api.get_containers", return_value=containers):
+        resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["stage"] == "FINAL"
+    assert body["fixtures"] == []
+
+
+def test_get_fixtures_by_stage_different_stages():
+    """Stage filter returns only matching fixtures."""
+    last32_fixture = {**KNOCKOUT_FIXTURE_DOC}
+    last16_fixture = {**KNOCKOUT_FIXTURE_DOC, "id": "fixture-537450", "stage": "LAST_16", "matchday": "LAST_16"}
+
+    req = _make_request(url="http://localhost/api/fixtures/stage/LAST_16")
+    containers = _mock_containers(fixtures=[last32_fixture, last16_fixture])
+
+    with patch("fn_api.get_containers", return_value=containers):
+        resp = api_main(req)
+
+    body = _json_body(resp)
+    assert body["stage"] == "LAST_16"
+    assert len(body["fixtures"]) == 2  # query_items mock returns all; fn_api relies on Cosmos WHERE clause

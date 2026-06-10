@@ -212,6 +212,19 @@ def _handle_usage(usage_container: Any) -> func.HttpResponse:
     })
 
 
+def _handle_fixtures_by_stage(fixtures_container: Any, stage: str) -> func.HttpResponse:
+    try:
+        docs = query_items(
+            fixtures_container,
+            "SELECT * FROM c WHERE c.stage = @stage",
+            parameters=[{"name": "@stage", "value": stage}],
+        )
+    except Exception as e:
+        logger.error("Error querying fixtures for stage %s: %s", stage, str(e), exc_info=True)
+        return _json_404(f"Fixtures not available for stage {stage}")
+    return _json_200({"stage": stage, "fixtures": docs})
+
+
 def _handle_accuracy(scores_container: Any) -> func.HttpResponse:
     docs = query_items(
         scores_container,
@@ -532,6 +545,11 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
         if route == "usage":
             return _handle_usage(usage_container)
+
+        # fixtures/stage/<stage_name>
+        m = re.fullmatch(r"fixtures/stage/([A-Z0-9_]+)", route)
+        if m:
+            return _handle_fixtures_by_stage(fixtures_container, m.group(1))
 
         # fixtures/<matchday>
         m = re.fullmatch(r"fixtures/(\d+)", route)

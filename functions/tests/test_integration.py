@@ -134,6 +134,7 @@ async def test_ingest_seeds_teams_and_upserts_fixture():
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=STUB_TEAMS)),
         patch("fn_ingest.fetch_matches_fd", side_effect=_fixtures_stub),
+        patch("fn_ingest.fetch_knockout_matches_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
     ):
         from fn_ingest import main as ingest_main
@@ -170,6 +171,7 @@ async def test_ingest_enqueues_message_on_finish():
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_matches_fd", side_effect=_ft_stub),
+        patch("fn_ingest.fetch_knockout_matches_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
     ):
         from fn_ingest import main as ingest_main
@@ -284,6 +286,7 @@ async def test_full_pipeline_end_to_end():
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=STUB_TEAMS)),
         patch("fn_ingest.fetch_matches_fd", side_effect=_fixtures_stub),
+        patch("fn_ingest.fetch_knockout_matches_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
     ):
         from fn_ingest import main as ingest_main

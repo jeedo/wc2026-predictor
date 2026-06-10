@@ -1,7 +1,7 @@
 """Tests for accuracy scoring — task 13."""
 import pytest
 
-from fn_predict.scoring import compute_accuracy, _group_winner_runnerup
+from fn_predict.scoring import compute_accuracy, _group_winner_runnerup, compute_knockout_accuracy
 
 
 # ---------------------------------------------------------------------------
@@ -88,3 +88,110 @@ def test_compute_accuracy_zero_score():
     result = compute_accuracy(predictions, standings)
     assert result["score"] == 0
     assert result["groups"][0]["correct"] is False
+
+
+# ---------------------------------------------------------------------------
+# compute_knockout_accuracy (issue #32)
+# ---------------------------------------------------------------------------
+
+def _knockout_pred(fixture_id: int, stage: str, predicted_winner: str) -> dict:
+    return {
+        "stage": stage,
+        "matches": [
+            {
+                "fixtureId": fixture_id,
+                "stage": stage,
+                "homeTeam": "TeamA",
+                "awayTeam": "TeamB",
+                "predictedWinner": predicted_winner,
+                "predictedHomeScore": 2,
+                "predictedAwayScore": 1,
+                "confidence": "high",
+            }
+        ],
+    }
+
+
+def _knockout_fixture(fixture_id: int, stage: str, home: str, away: str, home_score: int, away_score: int) -> dict:
+    return {
+        "fixtureId": fixture_id,
+        "stage": stage,
+        "homeTeam": home,
+        "awayTeam": away,
+        "homeScore": home_score,
+        "awayScore": away_score,
+        "status": "FT",
+    }
+
+
+def test_compute_knockout_accuracy_correct_prediction():
+    """Correct winner prediction scores 1 point."""
+    knockout_preds = [_knockout_pred(537417, "LAST_32", "Germany")]
+    # Germany wins 2-1
+    knockout_preds[0]["matches"][0]["homeTeam"] = "Germany"
+    knockout_preds[0]["matches"][0]["awayTeam"] = "Mexico"
+    finished = [_knockout_fixture(537417, "LAST_32", "Germany", "Mexico", 2, 1)]
+
+    result = compute_knockout_accuracy(knockout_preds, finished)
+    assert result["knockoutScore"] == 1
+    assert result["knockoutTotal"] == 1
+    assert result["knockoutMatches"][0]["correct"] is True
+    assert result["knockoutMatches"][0]["actualWinner"] == "Germany"
+
+
+def test_compute_knockout_accuracy_wrong_prediction():
+    """Incorrect winner prediction scores 0."""
+    knockout_preds = [_knockout_pred(537417, "LAST_32", "Mexico")]
+    knockout_preds[0]["matches"][0]["homeTeam"] = "Germany"
+    knockout_preds[0]["matches"][0]["awayTeam"] = "Mexico"
+    finished = [_knockout_fixture(537417, "LAST_32", "Germany", "Mexico", 2, 0)]
+
+    result = compute_knockout_accuracy(knockout_preds, finished)
+    assert result["knockoutScore"] == 0
+    assert result["knockoutMatches"][0]["correct"] is False
+    assert result["knockoutMatches"][0]["actualWinner"] == "Germany"
+    assert result["knockoutMatches"][0]["predictedWinner"] == "Mexico"
+
+
+def test_compute_knockout_accuracy_skips_unfinished():
+    """Unfinished knockout fixtures are not counted."""
+    knockout_preds = [_knockout_pred(537417, "LAST_32", "Germany")]
+    knockout_preds[0]["matches"][0]["homeTeam"] = "Germany"
+    knockout_preds[0]["matches"][0]["awayTeam"] = "Mexico"
+    # Not finished
+    unfinished = [
+        {"fixtureId": 537417, "homeTeam": "Germany", "awayTeam": "Mexico",
+         "homeScore": None, "awayScore": None, "status": "NS"}
+    ]
+
+    result = compute_knockout_accuracy(knockout_preds, unfinished)
+    assert result["knockoutScore"] == 0
+    assert result["knockoutTotal"] == 0
+
+
+def test_compute_knockout_accuracy_multiple_stages():
+    """Multiple knockout stages are all evaluated."""
+    knockout_preds = [
+        _knockout_pred(1, "LAST_32", "Germany"),
+        _knockout_pred(2, "LAST_16", "Brazil"),
+    ]
+    knockout_preds[0]["matches"][0]["homeTeam"] = "Germany"
+    knockout_preds[0]["matches"][0]["awayTeam"] = "Mexico"
+    knockout_preds[1]["matches"][0]["homeTeam"] = "Brazil"
+    knockout_preds[1]["matches"][0]["awayTeam"] = "USA"
+    finished = [
+        _knockout_fixture(1, "LAST_32", "Germany", "Mexico", 2, 0),
+        _knockout_fixture(2, "LAST_16", "USA", "Brazil", 1, 0),
+    ]
+
+    result = compute_knockout_accuracy(knockout_preds, finished)
+    assert result["knockoutScore"] == 1   # Germany correct, Brazil incorrect
+    assert result["knockoutTotal"] == 2
+
+
+def test_compute_knockout_accuracy_empty_input():
+    """Empty predictions return zero score."""
+    result = compute_knockout_accuracy([], [])
+    assert result["knockoutScore"] == 0
+    assert result["knockoutTotal"] == 0
+    assert result["knockoutMatches"] == []

@@ -94,6 +94,7 @@ async def test_ingest_seeds_teams_on_first_run():
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=fake_teams)),
         patch("fn_ingest.fetch_matches_fd", AsyncMock(return_value=fake_fixtures)),
+        patch("fn_ingest.fetch_knockout_matches_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
     ):
         await ingest_main(timer)
@@ -138,6 +139,7 @@ async def test_ingest_enqueues_on_finished_transition():
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_matches_fd", side_effect=_fixtures_by_matchday),
+        patch("fn_ingest.fetch_knockout_matches_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
     ):
         await ingest_main(timer)
@@ -172,6 +174,7 @@ async def test_ingest_logs_start_and_completion(caplog):
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_matches_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_knockout_matches_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
         caplog.at_level(logging.INFO, logger="fn_ingest"),
     ):
@@ -215,6 +218,7 @@ async def test_ingest_logs_enqueue_event(caplog):
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_matches_fd", side_effect=_ft_stub),
+        patch("fn_ingest.fetch_knockout_matches_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
         caplog.at_level(logging.INFO, logger="fn_ingest"),
     ):
@@ -296,6 +300,7 @@ async def test_ingest_logs_correlation_id_from_message(caplog):
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_matches_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_knockout_matches_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
         caplog.at_level(logging.INFO, logger="fn_ingest"),
     ):
@@ -339,6 +344,7 @@ async def test_ingest_predict_trigger_contains_correlation_id():
         patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
         patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_matches_fd", side_effect=_ft_stub),
+        patch("fn_ingest.fetch_knockout_matches_fd", AsyncMock(return_value=[])),
         patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
     ):
         await ingest_main(msg)
@@ -347,3 +353,228 @@ async def test_ingest_predict_trigger_contains_correlation_id():
     sent = json.loads(mock_queue.send_message.call_args[0][0])
     assert sent.get("correlationId") == "corr-abc-999", \
         f"predict-trigger message must forward correlationId, got: {sent}"
+
+
+# ---------------------------------------------------------------------------
+# Knockout stage support (issue #32)
+# ---------------------------------------------------------------------------
+
+def test_build_fixture_doc_knockout_null_matchday_uses_stage():
+    """When matchday is null (knockout), the stage string is used as matchday."""
+    raw = {
+        "id": 537417,
+        "utcDate": "2026-06-28T19:00:00Z",
+        "status": "TIMED",
+        "matchday": None,
+        "stage": "LAST_32",
+        "homeTeam": {"id": None, "name": None},
+        "awayTeam": {"id": None, "name": None},
+        "score": {"fullTime": {"home": None, "away": None}},
+    }
+    doc = _build_fixture_doc(raw)
+    assert doc["matchday"] == "LAST_32"
+    assert doc["stage"] == "LAST_32"
+
+
+def test_build_fixture_doc_knockout_tbd_teams_stored_as_tbd():
+    """TBD teams (null name) are stored as 'TBD' string."""
+    raw = {
+        "id": 537417,
+        "utcDate": "2026-06-28T19:00:00Z",
+        "status": "TIMED",
+        "matchday": None,
+        "stage": "LAST_32",
+        "homeTeam": {"id": None, "name": None},
+        "awayTeam": {"id": None, "name": None},
+        "score": {"fullTime": {"home": None, "away": None}},
+    }
+    doc = _build_fixture_doc(raw)
+    assert doc["homeTeam"] == "TBD"
+    assert doc["awayTeam"] == "TBD"
+
+
+def test_build_fixture_doc_group_stage_has_stage_field():
+    """Group stage fixtures include a stage field."""
+    raw = {
+        "id": 101,
+        "utcDate": "2026-06-12T15:00:00Z",
+        "status": "FINISHED",
+        "matchday": 1,
+        "stage": "GROUP_STAGE",
+        "homeTeam": {"id": 1, "name": "Germany"},
+        "awayTeam": {"id": 2, "name": "Mexico"},
+        "score": {"fullTime": {"home": 2, "away": 0}},
+    }
+    doc = _build_fixture_doc(raw)
+    assert doc["stage"] == "GROUP_STAGE"
+    assert doc["matchday"] == 1
+
+
+def test_build_fixture_doc_knockout_with_known_teams():
+    """Knockout fixture with resolved teams stores team names correctly."""
+    raw = {
+        "id": 537418,
+        "utcDate": "2026-06-28T22:00:00Z",
+        "status": "TIMED",
+        "matchday": None,
+        "stage": "LAST_32",
+        "homeTeam": {"id": 10, "name": "Brazil"},
+        "awayTeam": {"id": 20, "name": "USA"},
+        "score": {"fullTime": {"home": None, "away": None}},
+    }
+    doc = _build_fixture_doc(raw)
+    assert doc["homeTeam"] == "Brazil"
+    assert doc["awayTeam"] == "USA"
+    assert doc["matchday"] == "LAST_32"
+    assert doc["stage"] == "LAST_32"
+    assert doc["id"] == "fixture-537418"
+
+
+@pytest.mark.asyncio
+async def test_ingest_fetches_knockout_fixtures():
+    """fn_ingest fetches all KNOCKOUT_STAGES in addition to group stage matchdays."""
+    from fn_ingest import KNOCKOUT_STAGES
+    from fn_ingest import fetch_knockout_matches_fd as ingest_knockout_fetch
+
+    timer = _queue_msg_mock()
+
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([1]))
+
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.read_item = AsyncMock(side_effect=Exception("not found"))
+    mock_fixtures_container.upsert_item = AsyncMock()
+
+    knockout_raw = {
+        "id": 537417,
+        "utcDate": "2026-06-28T19:00:00Z",
+        "status": "TIMED",
+        "matchday": None,
+        "stage": "LAST_32",
+        "group": None,
+        "homeTeam": {"id": None, "name": None},
+        "awayTeam": {"id": None, "name": None},
+        "score": {"fullTime": {"home": None, "away": None}},
+    }
+
+    knockout_call_tracker: list[str] = []
+
+    async def _knockout_stub(_api, _http, stage):
+        knockout_call_tracker.append(stage)
+        return [knockout_raw] if stage == "LAST_32" else []
+
+    with (
+        patch("fn_ingest.get_containers", return_value=(mock_teams_container, mock_fixtures_container)),
+        patch("fn_ingest.get_queue_client", return_value=AsyncMock()),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_matches_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_knockout_matches_fd", side_effect=_knockout_stub),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
+    ):
+        await ingest_main(timer)
+
+    assert set(knockout_call_tracker) == set(KNOCKOUT_STAGES), \
+        f"Expected to fetch all knockout stages, got: {knockout_call_tracker}"
+
+
+@pytest.mark.asyncio
+async def test_ingest_upserts_knockout_fixtures():
+    """Knockout fixtures are upserted to the fixtures container."""
+    timer = _queue_msg_mock()
+
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([1]))
+
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.read_item = AsyncMock(side_effect=Exception("not found"))
+    mock_fixtures_container.upsert_item = AsyncMock()
+
+    knockout_fixture = {
+        "id": 537417,
+        "utcDate": "2026-06-28T19:00:00Z",
+        "status": "TIMED",
+        "matchday": None,
+        "stage": "LAST_32",
+        "group": None,
+        "homeTeam": {"id": None, "name": None},
+        "awayTeam": {"id": None, "name": None},
+        "score": {"fullTime": {"home": None, "away": None}},
+    }
+
+    async def _knockout_stub(_api, _http, stage):
+        return [knockout_fixture] if stage == "LAST_32" else []
+
+    with (
+        patch("fn_ingest.get_containers", return_value=(mock_teams_container, mock_fixtures_container)),
+        patch("fn_ingest.get_queue_client", return_value=AsyncMock()),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_matches_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_knockout_matches_fd", side_effect=_knockout_stub),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
+    ):
+        await ingest_main(timer)
+
+    upserted_docs = [call[1]["body"] for call in mock_fixtures_container.upsert_item.call_args_list]
+    knockout_docs = [d for d in upserted_docs if d.get("stage") == "LAST_32"]
+    assert len(knockout_docs) == 1
+    assert knockout_docs[0]["homeTeam"] == "TBD"
+    assert knockout_docs[0]["matchday"] == "LAST_32"
+
+
+@pytest.mark.asyncio
+async def test_ingest_enqueues_on_finished_knockout():
+    """When a knockout fixture transitions to FT, a predict trigger is enqueued."""
+    timer = _queue_msg_mock()
+
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([1]))
+
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.read_item = AsyncMock(
+        return_value={"status": "NS"}
+    )
+    mock_fixtures_container.upsert_item = AsyncMock()
+
+    mock_queue = AsyncMock()
+    mock_queue.send_message = AsyncMock()
+
+    finished_knockout = {
+        "id": 537417,
+        "utcDate": "2026-06-28T19:00:00Z",
+        "status": "FINISHED",
+        "matchday": None,
+        "stage": "LAST_32",
+        "group": None,
+        "homeTeam": {"id": 10, "name": "Brazil"},
+        "awayTeam": {"id": 20, "name": "Argentina"},
+        "score": {"fullTime": {"home": 1, "away": 0}},
+    }
+
+    async def _knockout_stub(_api, _http, stage):
+        return [finished_knockout] if stage == "LAST_32" else []
+
+    with (
+        patch("fn_ingest.get_containers", return_value=(mock_teams_container, mock_fixtures_container)),
+        patch("fn_ingest.get_queue_client", return_value=mock_queue),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_matches_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_knockout_matches_fd", side_effect=_knockout_stub),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
+    ):
+        await ingest_main(timer)
+
+    mock_queue.send_message.assert_called()
+    sent_messages = [
+        json.loads(call[0][0]) for call in mock_queue.send_message.call_args_list
+    ]
+    knockout_trigger = next(
+        (m for m in sent_messages if m.get("fixtureId") == 537417), None
+    )
+    assert knockout_trigger is not None, "Expected a predict trigger for the finished knockout fixture"
+    assert knockout_trigger["matchday"] == "LAST_32"

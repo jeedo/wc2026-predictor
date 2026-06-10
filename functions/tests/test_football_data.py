@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 
-from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd, fetch_standings_fd
+from shared.football_data import FootballDataClient, fetch_teams_fd, fetch_matches_fd, fetch_standings_fd, fetch_knockout_matches_fd
 
 
 @pytest.fixture
@@ -187,3 +187,59 @@ async def test_fetch_groups_does_not_retry_on_non_200():
             await fetch_groups_from_standings("test-key")
 
     assert mock_client.get.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# fetch_knockout_matches_fd
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_fetch_knockout_matches_calls_correct_stage_param(client):
+    """fetch_knockout_matches_fd passes stage= as a query param."""
+    ok = _ok_response({"matches": [{"id": 537417, "stage": "LAST_32"}]})
+    http = AsyncMock()
+    http.get = AsyncMock(return_value=ok)
+
+    result = await fetch_knockout_matches_fd(client, http, stage="LAST_32")
+
+    assert len(result) == 1
+    assert result[0]["id"] == 537417
+    call_kwargs = http.get.call_args
+    assert call_kwargs.kwargs.get("params") == {"stage": "LAST_32"}
+
+
+@pytest.mark.asyncio
+async def test_fetch_knockout_matches_returns_empty_list_when_no_matches(client):
+    ok = _ok_response({"matches": []})
+    http = AsyncMock()
+    http.get = AsyncMock(return_value=ok)
+
+    result = await fetch_knockout_matches_fd(client, http, stage="FINAL")
+
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_knockout_matches_retries_on_transient_error(client):
+    ok = _ok_response({"matches": [{"id": 537417}]})
+    http = AsyncMock()
+    http.get = AsyncMock(side_effect=[httpx.RemoteProtocolError("Server disconnected"), ok])
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        result = await fetch_knockout_matches_fd(client, http, stage="LAST_32")
+
+    assert result == [{"id": 537417}]
+    assert http.get.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_knockout_matches_does_not_retry_on_http_status_error(client):
+    http = AsyncMock()
+    http.get = AsyncMock(side_effect=httpx.HTTPStatusError(
+        "404", request=MagicMock(), response=MagicMock(status_code=404)
+    ))
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await fetch_knockout_matches_fd(client, http, stage="LAST_32")
+
+    assert http.get.call_count == 1
