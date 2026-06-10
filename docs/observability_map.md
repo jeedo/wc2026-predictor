@@ -69,28 +69,30 @@ POST /api/ingest
 
 All queries run against `law-wc2026-zwn7h5hfxftt2` (workspace ID `73c43f55-5a43-4843-a85a-87baec2305d9`).
 
+**Note:** Data is stored in workspace-native tables (`AppTraces`, `AppRequests`, `AppExceptions`) — not the legacy `traces`/`requests`/`exceptions` tables, which are empty.
+
 ### Trace a single run end-to-end by correlationId
 ```kusto
-traces
-| where message has "correlationId=<paste-id-here>"
-| order by timestamp asc
-| project timestamp, operation_Name, message
+AppTraces
+| where Message has "correlationId=<paste-id-here>"
+| order by TimeGenerated asc
+| project TimeGenerated, OperationName, Message
 ```
 
 ### Function App traces (fn_ingest, fn_predict, fn_api)
 ```kusto
-traces
-| where timestamp > ago(1h)
-| order by timestamp desc
-| project timestamp, severityLevel, message, operation_Name
+AppTraces
+| where TimeGenerated > ago(1h)
+| order by TimeGenerated desc
+| project TimeGenerated, SeverityLevel, Message, OperationName
 ```
 
 ### Recent function requests with status codes
 ```kusto
-requests
-| where timestamp > ago(1h)
-| project timestamp, operation_Name, url, resultCode, duration
-| order by timestamp desc
+AppRequests
+| where TimeGenerated > ago(1h)
+| project TimeGenerated, Name, Url, ResultCode, DurationMs
+| order by TimeGenerated desc
 ```
 
 ### Logic App run history
@@ -118,9 +120,9 @@ let logicFires = AzureDiagnostics
     | where ResourceProvider == "MICROSOFT.LOGIC"
     | where OperationName has "workflowRunCompleted"
     | project logicTime=TimeGenerated, logicStatus=status_s;
-let ingestTraces = traces
-    | where operation_Name has "fn_ingest"
-    | project ingestTime=timestamp, msg=message;
+let ingestTraces = AppTraces
+    | where OperationName has "fn_ingest"
+    | project ingestTime=TimeGenerated, msg=Message;
 logicFires
 | join kind=fullouter (ingestTraces) on $left.logicTime between (ingestTime - 5m .. ingestTime + 5m)
 | project logicTime, logicStatus, ingestTime, msg
@@ -135,7 +137,7 @@ logicFires
 
 2. ~~**23 stale poison messages in `predict-trigger-poison`**~~ — Purged 2026-06-09. Were old-format messages `{"matchday":1,"fixtureId":null}` from before the fn_predict refactor.
 
-3. **`CLAUDE.md` debugging examples used wrong App Insights name** — fixed to use appId `188592ac-7e4e-4efc-bbab-9b0e22255130` directly. `debug/get_logs.py` already uses the correct appId.
+3. ~~**`CLAUDE.md` debugging examples used wrong App Insights name**~~ — fixed. `debug/get_logs.py` now queries the Log Analytics workspace directly (`az monitor log-analytics query --workspace 73c43f55-...`) using workspace-native tables (`AppTraces`, `AppRequests`, `AppExceptions`).
 
 ---
 

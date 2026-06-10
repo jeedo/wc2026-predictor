@@ -10,6 +10,7 @@ import re
 from collections import defaultdict
 from datetime import date, datetime, timezone
 from typing import Any
+from urllib.parse import unquote
 
 import azure.functions as func
 from azure.cosmos import CosmosClient, PartitionKey  # sync client — fn_api is synchronous
@@ -69,6 +70,15 @@ def get_ingest_queue_client() -> QueueClient:
         queue_name=os.environ.get("INGEST_QUEUE_NAME", "ingest-trigger"),
         message_encode_policy=BinaryBase64EncodePolicy(),
     )
+
+
+def get_news_container() -> Any:
+    cosmos = CosmosClient.from_connection_string(
+        os.environ["CosmosDbConnectionString"],
+        connection_verify=True,
+    )
+    db = cosmos.get_database_client(os.environ.get("COSMOS_DATABASE_NAME", "wc2026"))
+    return db.get_container_client("news")
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +233,22 @@ def _handle_fixtures_by_stage(fixtures_container: Any, stage: str) -> func.HttpR
         logger.error("Error querying fixtures for stage %s: %s", stage, str(e), exc_info=True)
         return _json_404(f"Fixtures not available for stage {stage}")
     return _json_200({"stage": stage, "fixtures": docs})
+
+
+def _handle_news(news_container: Any, team_name: str) -> func.HttpResponse:
+    docs = query_items(
+        news_container,
+        "SELECT * FROM c WHERE c.teamName = @team ORDER BY c.date DESC OFFSET 0 LIMIT 1",
+        parameters=[{"name": "@team", "value": team_name}],
+    )
+    if docs:
+        doc = docs[0]
+        return _json_200({
+            "teamName": doc["teamName"],
+            "snippets": doc.get("snippets", []),
+            "date": doc.get("date"),
+        })
+    return _json_200({"teamName": team_name, "snippets": [], "date": None})
 
 
 def _handle_accuracy(scores_container: Any) -> func.HttpResponse:
@@ -555,6 +581,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         m = re.fullmatch(r"fixtures/(\d+)", route)
         if m:
             return _handle_fixtures(fixtures_container, predictions_container, int(m.group(1)))
+
+        # news/<team>
+        m = re.fullmatch(r"news/(.+)", route)
+        if m:
+            team_name = unquote(m.group(1))
+            news_container = get_news_container()
+            return _handle_news(news_container, team_name)
 
         return _json_404("Route not found")
     except Exception as e:

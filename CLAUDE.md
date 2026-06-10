@@ -109,12 +109,13 @@ gh issue list
 
 **Application Insights Logging:**
 - `APPINSIGHTS_INSTRUMENTATIONKEY` and `APPLICATIONINSIGHTS_CONNECTION_STRING` are automatically configured by Bicep
-- All function executions, exceptions, and traces are logged to App Insights
-- Check logs with: `az monitor app-insights query --app 188592ac-7e4e-4efc-bbab-9b0e22255130 --analytics-query "traces | order by timestamp desc | limit 20"`
+- All function executions, exceptions, and traces are logged to App Insights (workspace-based)
+- Data is in workspace-native tables — use `az monitor log-analytics query` not `az monitor app-insights query`
+- Check logs with: `az monitor log-analytics query --workspace 73c43f55-5a43-4843-a85a-87baec2305d9 --analytics-query "AppTraces | order by TimeGenerated desc | limit 20"`
 - Query examples:
-  - Recent errors: `exceptions | where timestamp > ago(30m) | order by timestamp desc`
-  - Failed requests: `requests | where success == false | order by timestamp desc`
-  - Function execution logs: `traces | where operation_Name contains 'fn_api' | order by timestamp desc`
+  - Recent errors: `AppExceptions | where TimeGenerated > ago(30m) | order by TimeGenerated desc`
+  - Failed requests: `AppRequests | where Success == false | order by TimeGenerated desc`
+  - Function execution logs: `AppTraces | where OperationName contains 'fn_api' | order by TimeGenerated desc`
 
 ---
 

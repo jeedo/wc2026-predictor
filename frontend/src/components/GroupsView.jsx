@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import { useFetch } from '../hooks/useFetch'
+import TeamNewsModal from './TeamNewsModal'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -21,6 +23,19 @@ const FLAGS = {
 
 function getFlag(name) {
   return FLAGS[name] ?? ''
+}
+
+function NewsButton({ team, onClick }) {
+  return (
+    <button
+      className="news-icon-btn"
+      title={`News: ${team}`}
+      aria-label={`News for ${team}`}
+      onClick={() => onClick(team)}
+    >
+      📰
+    </button>
+  )
 }
 
 function MatchPredictions({ matches }) {
@@ -50,7 +65,7 @@ function MatchPredictions({ matches }) {
   )
 }
 
-function GroupCard({ group, teams = [], prediction }) {
+function GroupCard({ group, teams = [], prediction, onNewsClick }) {
   return (
     <div className="group-card">
       <h2 className="group-title">Group {group}</h2>
@@ -60,6 +75,7 @@ function GroupCard({ group, teams = [], prediction }) {
           <div className="prediction-row winner">
             <span className="badge">1st</span>
             <span className="team-name">{getFlag(prediction.winner)} {prediction.winner}</span>
+            <NewsButton team={prediction.winner} onClick={onNewsClick} />
             {prediction.confidence && (
               <span className={`confidence-badge ${prediction.confidence}`}>
                 {prediction.confidence}
@@ -69,6 +85,7 @@ function GroupCard({ group, teams = [], prediction }) {
           <div className="prediction-row runner-up">
             <span className="badge">2nd</span>
             <span className="team-name">{getFlag(prediction.runnerUp)} {prediction.runnerUp}</span>
+            <NewsButton team={prediction.runnerUp} onClick={onNewsClick} />
           </div>
           {prediction.reasoning && (
             <p className="reasoning">{prediction.reasoning}</p>
@@ -80,6 +97,7 @@ function GroupCard({ group, teams = [], prediction }) {
           {teams.map(t => (
             <li key={t.teamId ?? t.name}>
               {getFlag(t.name)} {t.name}
+              <NewsButton team={t.name} onClick={onNewsClick} />
             </li>
           ))}
         </ul>
@@ -89,6 +107,7 @@ function GroupCard({ group, teams = [], prediction }) {
 }
 
 export default function GroupsView() {
+  const [newsTeam, setNewsTeam] = useState(null)
   const groups = useFetch(`${API_BASE}/api/groups`)
   const predictions = useFetch(`${API_BASE}/api/predictions`)
 
@@ -117,9 +136,13 @@ export default function GroupsView() {
             group={group}
             teams={teams}
             prediction={predByGroup[group] ?? null}
+            onNewsClick={setNewsTeam}
           />
         ))}
       </div>
+      {newsTeam && (
+        <TeamNewsModal teamName={newsTeam} onClose={() => setNewsTeam(null)} />
+      )}
     </section>
   )
 }
