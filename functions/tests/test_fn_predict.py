@@ -506,3 +506,131 @@ async def test_predict_logs_correlation_id(caplog):
 
     assert any("corr-xyz-5678" in r.message for r in caplog.records), \
         "fn_predict must log the correlationId from the queue message"
+
+
+# ---------------------------------------------------------------------------
+# Knockout stage support (issue #32)
+# ---------------------------------------------------------------------------
+
+def _make_knockout_fixture(
+    fixture_id: int,
+    stage: str,
+    home: str = "TBD",
+    away: str = "TBD",
+    status: str = "NS",
+    home_score: int | None = None,
+    away_score: int | None = None,
+) -> dict:
+    return {
+        "id": f"fixture-{fixture_id}",
+        "fixtureId": fixture_id,
+        "matchday": stage,
+        "stage": stage,
+        "homeTeam": home,
+        "awayTeam": away,
+        "homeScore": home_score,
+        "awayScore": away_score,
+        "status": status,
+        "kickoff": "2026-06-28T19:00:00Z",
+    }
+
+
+def test_build_prompt_includes_knockout_section_for_known_teams():
+    """Knockout fixtures with known (non-TBD) teams appear in the prompt."""
+    teams = [_make_team("A", "Germany"), _make_team("A", "Mexico")]
+    fixtures = [
+        _make_knockout_fixture(537417, "LAST_32", "Germany", "Mexico"),
+    ]
+    prompt = _build_prompt(teams=teams, fixtures=fixtures)
+    assert "Germany vs Mexico" in prompt
+    assert "LAST_32" in prompt or "knockout" in prompt.lower()
+
+
+def test_build_prompt_omits_tbd_knockout_matches():
+    """Knockout fixtures where both teams are TBD are excluded from the prompt."""
+    teams = [_make_team("A", "Germany")]
+    fixtures = [
+        _make_knockout_fixture(537417, "LAST_32", "TBD", "TBD"),
+        _make_knockout_fixture(537418, "LAST_32", "TBD", "TBD"),
+    ]
+    prompt = _build_prompt(teams=teams, fixtures=fixtures)
+    assert "537417" not in prompt
+    assert "537418" not in prompt
+
+
+def test_build_prompt_includes_some_known_knockout_excludes_tbd():
+    """Only non-TBD knockout matches appear; TBD pairs are excluded."""
+    teams = [_make_team("A", "Germany"), _make_team("A", "Brazil")]
+    fixtures = [
+        _make_knockout_fixture(1, "LAST_32", "Germany", "Brazil"),
+        _make_knockout_fixture(2, "LAST_32", "TBD", "TBD"),
+    ]
+    prompt = _build_prompt(teams=teams, fixtures=fixtures)
+    assert "Germany vs Brazil" in prompt
+    assert str(2) not in prompt or "TBD vs TBD" not in prompt
+
+
+def test_build_prompt_knockout_schema_included_when_knockout_present():
+    """When knockout fixtures with known teams exist, the schema includes knockout field."""
+    teams = [_make_team("A", "Germany"), _make_team("A", "Brazil")]
+    fixtures = [_make_knockout_fixture(1, "LAST_32", "Germany", "Brazil")]
+    prompt = _build_prompt(teams=teams, fixtures=fixtures)
+    assert "knockout" in prompt
+
+
+def test_predict_stores_knockout_in_prediction_doc(queue_msg):
+    """_main_async stores knockout predictions in the prediction document."""
+    import asyncio
+
+    CLAUDE_WITH_KNOCKOUT = json.dumps({
+        "predictions": [
+            {"group": "A", "winner": "Germany", "runnerUp": "Mexico", "reasoning": "..."}
+        ],
+        "knockout": [
+            {
+                "stage": "LAST_32",
+                "matches": [
+                    {
+                        "fixtureId": 537417,
+                        "stage": "LAST_32",
+                        "homeTeam": "Germany",
+                        "awayTeam": "Mexico",
+                        "predictedWinner": "Germany",
+                        "predictedHomeScore": 2,
+                        "predictedAwayScore": 1,
+                        "confidence": "high",
+                    }
+                ],
+            }
+        ],
+    })
+
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(
+        return_value=_async_iter([_make_team("A", "Germany")])
+    )
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.query_items = MagicMock(return_value=_async_iter([]))
+    mock_predictions_container = MagicMock()
+    mock_predictions_container.upsert_item = AsyncMock()
+
+    mock_response = MagicMock()
+    mock_response.usage = MagicMock(input_tokens=100, output_tokens=50)
+    mock_response.content = [MagicMock(text=CLAUDE_WITH_KNOCKOUT)]
+    mock_claude = MagicMock()
+    mock_claude.beta.messages.parse = AsyncMock(return_value=mock_response)
+
+    with (
+        patch("fn_predict.get_containers", return_value=(
+            mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
+        )),
+        patch("fn_predict.get_news_container", return_value=None),
+        patch("fn_predict.get_anthropic_client", return_value=mock_claude),
+    ):
+        asyncio.run(_main_async(queue_msg))
+
+    doc = mock_predictions_container.upsert_item.call_args[1]["body"]
+    assert "knockout" in doc
+    assert len(doc["knockout"]) == 1
+    assert doc["knockout"][0]["stage"] == "LAST_32"
+    assert doc["knockout"][0]["matches"][0]["predictedWinner"] == "Germany"

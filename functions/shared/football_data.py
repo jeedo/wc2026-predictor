@@ -98,3 +98,17 @@ async def fetch_matches_fd(
     matches = resp.json().get("matches", [])
     logger.info("Fetched %d matches for matchday %d", len(matches), matchday)
     return matches
+
+
+async def fetch_knockout_matches_fd(
+    client: FootballDataClient, http: httpx.AsyncClient,
+    stage: str,
+) -> list[dict[str, Any]]:
+    """Fetch fixtures for a knockout stage (e.g. LAST_32, LAST_16)."""
+    url = f"{_BASE_URL}/competitions/{_COMPETITION_ID}/matches"
+    logger.info("Fetching matches for stage %s from: %s", stage, url)
+    resp = await _get_with_retry(http, url, headers=client.headers, params={"stage": stage})
+    resp.raise_for_status()
+    matches = resp.json().get("matches", [])
+    logger.info("Fetched %d matches for stage %s", len(matches), stage)
+    return matches
