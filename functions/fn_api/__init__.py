@@ -191,7 +191,7 @@ def _handle_usage(usage_container: Any) -> func.HttpResponse:
         doc_date: str = doc.get("date", "")
 
         is_current = (
-            (window == "day" and doc_date == today) or
+            (window in ("day", "minute") and doc_date == today) or
             (window == "month" and doc_date.startswith(this_month))
         )
         if not is_current:

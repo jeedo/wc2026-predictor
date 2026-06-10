@@ -10,9 +10,9 @@ from azure.cosmos.exceptions import CosmosResourceNotFoundError
 logger = logging.getLogger(__name__)
 
 PROVIDER_LIMITS: dict[str, dict[str, Any]] = {
-    "api-football": {"limit": 100, "window": "day"},
-    "anthropic":    {"limit": None, "window": "day"},
-    "serper":       {"limit": 2500, "window": "month"},
+    "football-data": {"limit": 10, "window": "minute"},
+    "anthropic":     {"limit": None, "window": "day"},
+    "serper":        {"limit": 2500, "window": "month"},
 }
 
 

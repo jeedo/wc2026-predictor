@@ -5,7 +5,7 @@ import UsageView from '../components/UsageView'
 const USAGE_DATA = {
   asOf: '2026-06-03T10:00:00Z',
   providers: [
-    { name: 'api-football', callCount: 8, limit: 100, window: 'day', percentUsed: 8.0 },
+    { name: 'football-data', callCount: 8, limit: 10, window: 'minute', percentUsed: 80.0 },
     { name: 'anthropic', callCount: 2, inputTokens: 20000, outputTokens: 1500, limit: null, window: 'day' },
     { name: 'serper', callCount: 96, limit: 2500, window: 'month', percentUsed: 3.84 },
   ],
@@ -26,7 +26,7 @@ test('renders provider names after load', async () => {
   }))
   render(<UsageView />)
   await waitFor(() => {
-    expect(screen.getByText(/api-football/i)).toBeInTheDocument()
+    expect(screen.getByText(/football-data/i)).toBeInTheDocument()
     expect(screen.getByText(/anthropic/i)).toBeInTheDocument()
     expect(screen.getByText(/serper/i)).toBeInTheDocument()
   })
@@ -39,7 +39,7 @@ test('shows call counts and limits', async () => {
   }))
   render(<UsageView />)
   await waitFor(() => {
-    expect(screen.getByText(/8\s*\/\s*100/)).toBeInTheDocument()
+    expect(screen.getByText(/8\s*\/\s*10/)).toBeInTheDocument()
   })
 })
 

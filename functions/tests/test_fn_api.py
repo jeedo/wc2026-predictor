@@ -526,8 +526,8 @@ from datetime import date as _date
 
 USAGE_DOCS = [
     {
-        "id": f"usage-api-football-{_date.today().isoformat()}",
-        "provider": "api-football",
+        "id": f"usage-football-data-{_date.today().isoformat()}",
+        "provider": "football-data",
         "date": _date.today().isoformat(),
         "callCount": 8,
     },
@@ -559,7 +559,7 @@ def test_get_usage_returns_providers():
     body = _json_body(resp)
     assert "providers" in body
     names = [p["name"] for p in body["providers"]]
-    assert "api-football" in names
+    assert "football-data" in names
     assert "anthropic" in names
 
 
@@ -571,10 +571,10 @@ def test_get_usage_includes_limit_and_percent():
         resp = api_main(req)
 
     body = _json_body(resp)
-    af = next(p for p in body["providers"] if p["name"] == "api-football")
+    af = next(p for p in body["providers"] if p["name"] == "football-data")
     assert af["callCount"] == 8
-    assert af["limit"] == 100
-    assert af["percentUsed"] == pytest.approx(8.0)
+    assert af["limit"] == 10
+    assert af["percentUsed"] == pytest.approx(80.0)
 
 
 def test_get_usage_returns_empty_providers_when_no_data():
