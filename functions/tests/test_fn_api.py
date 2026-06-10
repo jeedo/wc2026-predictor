@@ -661,3 +661,75 @@ def test_get_fixtures_by_stage_different_stages():
     body = _json_body(resp)
     assert body["stage"] == "LAST_16"
     assert len(body["fixtures"]) == 2  # query_items mock returns all; fn_api relies on Cosmos WHERE clause
+
+
+# ---------------------------------------------------------------------------
+# GET /api/news/<team>
+# ---------------------------------------------------------------------------
+
+NEWS_DOC = {
+    "id": "news-germany-2026-06-09",
+    "teamName": "Germany",
+    "date": "2026-06-09",
+    "snippets": ["Germany squad confirmed", "Müller ruled out"],
+}
+
+
+def _mock_news_container(docs=None):
+    mc = MagicMock()
+    mc.query_items = MagicMock(return_value=iter(docs or []))
+    return mc
+
+
+def test_get_news_returns_snippets():
+    req = _make_request(url="http://localhost/api/news/Germany")
+    containers = _mock_containers()
+    news_container = _mock_news_container(docs=[NEWS_DOC])
+
+    with (
+        patch("fn_api.get_containers", return_value=containers),
+        patch("fn_api.get_news_container", return_value=news_container),
+    ):
+        resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["teamName"] == "Germany"
+    assert body["snippets"] == ["Germany squad confirmed", "Müller ruled out"]
+    assert body["date"] == "2026-06-09"
+
+
+def test_get_news_returns_empty_when_no_cache():
+    req = _make_request(url="http://localhost/api/news/Germany")
+    containers = _mock_containers()
+    news_container = _mock_news_container(docs=[])
+
+    with (
+        patch("fn_api.get_containers", return_value=containers),
+        patch("fn_api.get_news_container", return_value=news_container),
+    ):
+        resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["teamName"] == "Germany"
+    assert body["snippets"] == []
+    assert body["date"] is None
+
+
+def test_get_news_url_decodes_team_name():
+    """Team names with spaces arrive URL-encoded and must be decoded."""
+    req = _make_request(url="http://localhost/api/news/United%20States")
+    containers = _mock_containers()
+    news_doc = {**NEWS_DOC, "teamName": "United States", "id": "news-united-states-2026-06-09"}
+    news_container = _mock_news_container(docs=[news_doc])
+
+    with (
+        patch("fn_api.get_containers", return_value=containers),
+        patch("fn_api.get_news_container", return_value=news_container),
+    ):
+        resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["teamName"] == "United States"

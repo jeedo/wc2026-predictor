@@ -32,7 +32,7 @@ The FIFA World Cup 2026 group stage features 48 teams across 12 groups (A–L), 
 | Event Bus    | Azure Queue Storage                      | Free (bundled with Functions storage account); decouples ingest from prediction |
 | Database     | Azure Cosmos DB — NoSQL API              | Permanent free tier: 1,000 RU/s + 25GB; schema-free JSON fits team/fixture data |
 | AI / LLM     | Anthropic Claude API (claude-haiku-4-5)  | ~$0.14 for full group stage; sufficient for structured JSON prediction tasks    |
-| Data Source  | API-Football v3 (api-sports.io)          | Free tier: 100 req/day; covers WC 2026 fixtures, live scores, group standings   |
+| Data Source  | football-data.org v4                     | Free tier: 10 req/min; covers WC 2026 fixtures, live scores, group standings    |
 | News Search  | Serper.dev (Google Search API)           | Free tier: 2,500 searches/month; provides up-to-date team news for Claude prompt |
 | Secrets      | Azure Key Vault                          | Managed identity access; no credentials in app settings or source control       |
 | CI/CD        | Azure DevOps Pipelines                   | YAML pipelines; Bicep infra + function deploy stages                            |
@@ -63,10 +63,13 @@ Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
 
 - Triggered by `POST /api/ingest` (fn-api enqueues to `ingest-trigger`, returns 202 immediately)
 - Retrieves `FOOTBALL_DATA_API_KEY` and Cosmos DB connection string from Key Vault via managed identity
-- Calls football-data.org to fetch current WC fixtures and group standings
+- Calls football-data.org v4 (`/v4/competitions/2000/...`) to fetch current WC fixtures and group standings
 - On first run: seeds the `teams` container with all 48 teams and group assignments derived from standings
-- Upserts latest fixture and result data into the `fixtures` Cosmos DB container
-- After each upsert, compares incoming `status` against the previously stored value; if any fixture transitions to `FINISHED`, enqueues a **Base64-encoded** JSON message `{"matchday": N, "fixtureId": M}` to the `predict-trigger` Storage Queue — Base64 encoding is required because the Azure Functions queue trigger is configured with `MessageEncoding: Base64`
+- Fetches **group stage** fixtures for matchdays 1–3 and **knockout stage** fixtures for all rounds (`LAST_32`, `LAST_16`, `QUARTER_FINALS`, `SEMI_FINALS`, `THIRD_PLACE`, `FINAL`)
+- Upserts all fixture and result data into the `fixtures` Cosmos DB container; knockout fixtures use the stage string (e.g. `"LAST_32"`) as the `matchday` field since the API returns `null` for knockout matchdays
+- HTTP calls to football-data.org use automatic retry with exponential backoff (2 s, 4 s) on transient connection errors (`RemoteProtocolError`, `ConnectError`, `ReadTimeout`); HTTP 4xx/5xx errors are not retried
+- After each upsert, compares incoming `status` against the previously stored value; if any fixture transitions to `FT`, enqueues a **Base64-encoded** JSON message `{"matchday": N, "fixtureId": M, "correlationId": "..."}` to the `predict-trigger` Storage Queue
+- Propagates a `correlationId` (UUID) through the queue message for end-to-end observability
 - Logs group assignment counts, fixture upsert counts, and enqueue events for observability
 
 #### fn-predict — Queue Trigger (`predict-trigger` queue)
@@ -76,10 +79,11 @@ Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
   1. When fn-ingest enqueues a message indicating one or more matches have finished (auto-regenerate predictions)
   2. When the `POST /api/predictions/trigger` HTTP endpoint is called (on-demand, before tournament starts)
 - Reads current `fixtures` and `teams` data from Cosmos DB
-- Constructs a structured prompt with group standings, team form, and FIFA rankings
-- If `SERPA_API_KEY` is set, fetches recent news for all teams **in parallel** via `asyncio.gather()` using **SerpApi** (`GET https://serpapi.com/search.json?engine=google_news`), enriching the Claude prompt with up-to-date injury/form/squad information; results are cached in the `news` Cosmos container for 12 hours (configurable via `SERPA_MAX_RESULTS`, default 3) to avoid redundant API calls within the same matchday
-- Calls Claude API (`claude-haiku-4-5`) requesting JSON output: group winner, runner-up, confidence level, reasoning per group, and per-match predictions with confidence
-- Writes prediction documents to the `predictions` container, versioned by matchday
+- Constructs a structured prompt with group standings, team form, and FIFA rankings; for knockout fixtures where both teams are known (not TBD), the prompt also includes a `KNOCKOUT FIXTURES` section
+- If `SERPA_API_KEY` is set, fetches recent news for all teams **in parallel** via `asyncio.gather()` using **Serper** (`POST https://google.serper.dev/news`), enriching the Claude prompt with up-to-date injury/form/squad information; results are cached in the `news` Cosmos container for 12 hours (configurable via `SERPA_MAX_RESULTS`, default 3) to avoid redundant API calls within the same matchday
+- Calls the **Claude API using structured outputs** (Pydantic `PredictionsResponse` model with `extra="forbid"`) to guarantee valid JSON; generates group-stage predictions (winner, runner-up, confidence, reasoning, per-match scores) **and** knockout match predictions (predicted winner per fixture)
+- Computes accuracy scores immediately after prediction if any finished fixtures are present, writing results to the `scores` container
+- Writes prediction documents to the `predictions` container under the fixed id `predictions-all`
 - Idempotent: if multiple messages arrive for the same matchday (e.g. two matches finish in the same 6h window), the latest run overwrites the previous prediction document
 
 #### fn-api — HTTP Trigger
@@ -87,10 +91,14 @@ Cosmos DB          →  fn-api (HTTP)            →  React Static Web App
 - Exposes a lightweight REST API consumed by the React frontend and operators
 - `GET /groups` — returns all 12 groups with current standings
 - `GET /predictions` — returns latest Claude predictions with per-group reasoning and confidence levels
-- `GET /fixtures/{matchday}` — returns scheduled and completed matches for a given matchday with predicted scores and confidence
+- `GET /fixtures/{matchday}` — returns scheduled and completed group-stage matches for a given matchday, with predicted scores merged in where available
+- `GET /fixtures/stage/{stage}` — returns fixtures for a knockout stage (e.g. `LAST_32`, `FINAL`); the stage string matches the value stored in the `stage` field of each fixture document
+- `GET /news/{team}` — returns the most recent cached news doc for a team (`{ teamName, snippets[], date }`); returns `{ snippets: [] }` if nothing is cached yet; team name is URL-decoded so spaces work
 - `GET /accuracy` — returns prediction accuracy stats after each matchday; a group counts as correct only if **both** predicted winner and runner-up match the actual final standings (strict scoring, max 12 points)
+- `GET /usage` — returns API call counts and token usage for the current window per provider (Anthropic, football-data.org), compared against configured rate-limit thresholds
 - `GET /status` — pipeline health snapshot: latest prediction metadata, Storage Queue depths (including poison queue), team count, and finished/total fixture counts; each component degrades independently (returns `null` for that field on error)
 - `POST /api/predictions/trigger` — enqueue a prediction generation job (optional JSON body: `{"matchday": 1}`); allows pre-tournament predictions before any matches finish
+- `POST /api/ingest` — enqueue an ingest job immediately; returns 202 with a `correlationId` for tracing
 
 ### 3.3 Cosmos DB Schema
 
@@ -99,16 +107,19 @@ Five containers, all using NoSQL JSON documents. Partition keys designed for poi
 | Container     | Partition Key | Sample Document Fields                                                                         |
 |---------------|---------------|------------------------------------------------------------------------------------------------|
 | `teams`       | `/group`      | `teamId`, `name`, `group`, `fifaRanking`, `recentForm[5]`, `squadDepth`                        |
-| `fixtures`    | `/matchday`   | `fixtureId`, `matchday`, `homeTeam`, `awayTeam`, `kickoff`, `homeScore`, `awayScore`, `status` |
-| `predictions` | `/matchday`   | `predictionId`, `matchday`, `generatedAt`, `groups[{group, winner, runnerUp, reasoning}]`      |
-| `scores`      | `/matchday`   | `scoreId`, `matchday`, `evaluatedAt`, `score`, `totalGroups`, `groups[{group, correct, predictedWinner, actualWinner, predictedRunnerUp, actualRunnerUp}]` |
+| `fixtures`    | `/matchday`   | `fixtureId`, `matchday`, `stage`, `homeTeam`, `awayTeam`, `kickoff`, `homeScore`, `awayScore`, `status` — for group-stage fixtures `matchday` is an integer (1–3); for knockout fixtures it is the stage string (e.g. `"LAST_32"`) because the API returns `null` |
+| `predictions` | `/matchday`   | `id` (`predictions-all`), `matchday`, `generatedAt`, `groups[{group, winner, runnerUp, confidence, reasoning, matches[]}]`, `knockout[{stage, matches[{fixtureId, predictedWinner, ...}]}]` |
+| `scores`      | `/matchday`   | `scoreId`, `matchday`, `evaluatedAt`, `score`, `totalGroups`, `groups[{group, correct, predictedWinner, actualWinner, predictedRunnerUp, actualRunnerUp}]`, `knockoutScore`, `knockoutTotal` |
 | `news`        | `/teamName`   | `id` (`news-{team}-{date}`), `teamName`, `date`, `snippets[]`, `ttl` (43200s / 12h)            |
+| `usage`       | `/provider`   | `id` (`usage-{provider}-{date}`), `provider`, `date`, `callCount`, `inputTokens`, `outputTokens` |
 
 ### 3.4 React Frontend
 
-- **Groups View**: all 12 groups (A–L) with predicted winner, runner-up, and Claude's reasoning blurb
+- **Groups View**: all 12 groups (A–L) with predicted winner, runner-up, and Claude's reasoning blurb; each team name shows a 📰 news icon that opens the `TeamNewsModal` overlay
+- **TeamNewsModal**: fetches `GET /news/{team}` on open; shows loading state, snippets list, empty state, and error state; closes on backdrop click, close button, or Escape key
 - **Fixtures View**: upcoming and completed matches with live scores per group
 - **Accuracy View**: after each matchday, shows correct vs incorrect predictions
+- **Usage View**: shows current-window API call counts and rate-limit percentage per provider
 - Deployed via the `frontend` stage in Azure DevOps Pipelines using the `AzureStaticWebApp@0` task
 - Calls `fn-api` HTTP trigger directly; no separate backend server required
 
@@ -168,25 +179,28 @@ The `infra` Bicep stage provisions the Key Vault, creates secrets, grants the Fu
 
 ## Data Model / API
 
-### API-Football v3
+### football-data.org v4
 
-Base URL: `https://v3.football.api-sports.io`  
-Auth header: `x-apisports-key: {APISPORTS_API_KEY}`  
-WC 2026 identifiers: `league=1`, `season=2026`  
-Free tier: **100 requests/day** — `fn-ingest` at 6h intervals uses at most ~12 calls/day (well within limit)
+Base URL: `https://api.football-data.org/v4`  
+Auth header: `X-Auth-Token: {FOOTBALL_DATA_API_KEY}`  
+WC 2026 identifiers: competition `2000` (code `WC`)  
+Free tier: **10 requests/minute** — `fn-ingest` runs at most ~10 calls per ingest cycle (well within limit)
 
-| Endpoint                                          | Parameters                                   | Usage                                          |
-|---------------------------------------------------|----------------------------------------------|------------------------------------------------|
-| `GET /fixtures`                                   | `league=1&season=2026&round=Group+Stage+-+N` | Fetch fixtures and live scores for a round     |
-| `GET /standings`                                  | `league=1&season=2026`                       | Fetch all 12 group tables                      |
-| `GET /teams`                                      | `league=1&season=2026`                       | Seed team metadata on first run                |
-| `GET /fixtures/rounds`                            | `league=1&season=2026`                       | Enumerate round names (returns `Group Stage - 1/2/3`) |
+| Endpoint                                                        | Parameters            | Usage                                             |
+|-----------------------------------------------------------------|-----------------------|---------------------------------------------------|
+| `GET /competitions/2000/teams`                                  | —                     | Seed all 48 WC2026 teams on first run             |
+| `GET /competitions/2000/standings`                              | —                     | Fetch all 12 group tables (used for group assignments) |
+| `GET /competitions/2000/matches`                                | `matchday=N`          | Fetch group-stage fixtures for matchday 1, 2, or 3 |
+| `GET /competitions/2000/matches`                                | `stage=LAST_32` etc.  | Fetch knockout fixtures per stage                 |
 
-The API's `round` field returns strings (`"Group Stage - 1"`, `"Group Stage - 2"`, `"Group Stage - 3"`). `fn-ingest` normalises these to integers `1`, `2`, `3` before writing to the `matchday` field in Cosmos DB.
+Knockout stage values: `LAST_32`, `LAST_16`, `QUARTER_FINALS`, `SEMI_FINALS`, `THIRD_PLACE`, `FINAL`.  
+The API returns `matchday: null` for all knockout fixtures — `fn-ingest` substitutes the stage string as the `matchday` value in Cosmos DB.
+
+All calls are wrapped in `_get_with_retry()` which retries up to 3 times with exponential backoff on `RemoteProtocolError`, `ConnectError`, and `ReadTimeout`; `HTTPStatusError` (4xx/5xx) is raised immediately without retry.
 
 ### Claude API Request Shape
 
-`fn-predict` sends a single request per prediction job (on-demand or post-match) containing all 12 groups. Claude responds with a JSON array including confidence ratings and per-match predictions:
+`fn-predict` sends a single request per prediction job (on-demand or post-match) containing all 12 groups and any known knockout fixtures. Claude responds with a validated JSON structure (enforced via Pydantic structured outputs) including confidence ratings, per-match predictions, and knockout winner predictions:
 
 ```json
 {
@@ -204,6 +218,23 @@ The API's `round` field returns strings (`"Group Stage - 1"`, `"Group Stage - 2"
           "matchday": 1,
           "predictedHomeScore": 2,
           "predictedAwayScore": 0,
+          "confidence": "high"
+        }
+      ]
+    }
+  ],
+  "knockout": [
+    {
+      "stage": "LAST_32",
+      "matches": [
+        {
+          "fixtureId": 537417,
+          "stage": "LAST_32",
+          "homeTeam": "Germany",
+          "awayTeam": "Mexico",
+          "predictedWinner": "Germany",
+          "predictedHomeScore": 2,
+          "predictedAwayScore": 1,
           "confidence": "high"
         }
       ]
@@ -275,7 +306,7 @@ A group is scored as correct only when **both** predicted winner and runner-up m
 | Azure Static Web Apps  | Free hobby tier (permanent)     | Personal project      | $0.00     |
 | Azure Logic Apps       | 4,000 actions/month free        | ~240 actions/month    | $0.00     |
 | Claude API (Haiku 4.5) | Pay-per-use                     | ~36 prediction calls  | ~$0.14    |
-| API-Football           | 100 req/day free                | ~12 calls/day (~250 total) | $0.00 |
+| football-data.org      | 10 req/min free                 | ~10 calls per ingest cycle | $0.00 |
 | **Total**              |                                 |                       | **~$0.14** |
 
 -----
@@ -322,8 +353,8 @@ The `POST /api/predictions/trigger` endpoint allows predictions to be generated 
 
 | Resource                   | URL                                                                     | Purpose                             |
 |----------------------------|-------------------------------------------------------------------------|-------------------------------------|
-| API-Football (api-sports.io) | <https://www.api-sports.io>                                           | Live WC fixture and standings data  |
-| API-Football Docs          | <https://www.api-football.com/documentation-v3>                         | v3 endpoint reference               |
+| football-data.org          | <https://www.football-data.org>                                         | Live WC fixture and standings data  |
+| football-data.org Docs     | <https://docs.football-data.org/general/v4>                             | v4 endpoint reference               |
 | Anthropic Console          | <https://console.anthropic.com>                                         | Claude API access and billing       |
 | Azure Cosmos DB Free Tier  | <https://learn.microsoft.com/en-us/azure/cosmos-db/free-tier>           | Free tier eligibility and limits    |
 | Azure Functions Pricing    | <https://azure.microsoft.com/en-us/pricing/details/functions/>          | Consumption plan free grant details |
