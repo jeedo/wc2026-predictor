@@ -31,9 +31,11 @@ When the user asks to work on a GitHub issue:
 ### When research is required
 
 - Fetch API docs or relevant pages with `WebFetch`
+- Call live APIs if real response shapes are needed to inform the implementation
 - Search the codebase with `grep` or the Explore agent for existing patterns
 - Check existing tests for conventions already in use
-- Summarise findings in the plan before proposing implementation
+- **Write findings to `docs/research.md`** — include the question being answered, what was tried, actual API responses or relevant excerpts, and the conclusion; append under a dated heading if the file already exists
+- Summarise the key conclusion in the plan before proposing implementation
 
 ---
 
