@@ -28,7 +28,7 @@ stages:
         pool:
           vmImage: ubuntu-latest
         steps:
-          - task: SendTelegramNotification@1
+          - task: SendTelegramNotification@0
             displayName: 'Notify Telegram: pipeline started'
             inputs:
               botToken: $(TELEGRAM_BOT_TOKEN)
@@ -119,7 +119,7 @@ stages:
 
                 echo "Key Vault secrets provisioned: apisports-api-key, anthropic-api-key, cosmos-connection-string"
 
-          - task: SendTelegramNotification@1
+          - task: SendTelegramNotification@0
             displayName: 'Notify Telegram: infrastructure stage result'
             condition: always()
             inputs:
@@ -176,7 +176,7 @@ stages:
                   --src functions.zip \
                   --build-remote true
 
-          - task: SendTelegramNotification@1
+          - task: SendTelegramNotification@0
             displayName: 'Notify Telegram: functions stage result'
             condition: always()
             inputs:
@@ -229,7 +229,7 @@ stages:
               output_location: ''
               skip_app_build: true
 
-          - task: SendTelegramNotification@1
+          - task: SendTelegramNotification@0
             displayName: 'Notify Telegram: frontend stage result'
             condition: always()
             inputs:
@@ -273,7 +273,7 @@ stages:
             env:
               functionAppName: $(functionAppName)
 
-          - task: SendTelegramNotification@1
+          - task: SendTelegramNotification@0
             displayName: 'Notify Telegram: smoke tests result'
             condition: always()
             inputs:
@@ -305,7 +305,7 @@ stages:
         pool:
           vmImage: ubuntu-latest
         steps:
-          - task: SendTelegramNotification@1
+          - task: SendTelegramNotification@0
             displayName: 'Notify Telegram: pipeline complete'
             inputs:
               botToken: $(TELEGRAM_BOT_TOKEN)
