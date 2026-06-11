@@ -191,7 +191,7 @@ def _handle_usage(usage_container: Any) -> func.HttpResponse:
         doc_date: str = doc.get("date", "")
 
         is_current = (
-            (window == "day" and doc_date == today) or
+            (window in ("day", "minute") and doc_date == today) or
             (window == "month" and doc_date.startswith(this_month))
         )
         if not is_current:
@@ -211,9 +211,9 @@ def _handle_usage(usage_container: Any) -> func.HttpResponse:
             if extra_key in doc:
                 entry[extra_key] = entry.get(extra_key, 0) + doc[extra_key]
 
-    # Compute percentUsed for providers with a limit
+    # Compute percentUsed for providers with a limit (skip minute-window — daily aggregate vs per-minute limit is not meaningful)
     for entry in by_provider.values():
-        if entry.get("limit"):
+        if entry.get("limit") and entry.get("window") != "minute":
             entry["percentUsed"] = round(entry["callCount"] / entry["limit"] * 100, 2)
 
     return _json_200({
@@ -424,11 +424,14 @@ def _handle_predictions_generate(
             betas=["structured-outputs-2025-11-13"],
         )
 
-        # Record usage
-        from shared.usage_tracker import record_call
-        asyncio.run(record_call(usage_container, "anthropic",
-                                inputTokens=response.usage.input_tokens,
-                                outputTokens=response.usage.output_tokens))
+        # Record usage (non-fatal; sync container requires sync call)
+        from shared.usage_tracker import record_call_sync
+        try:
+            record_call_sync(usage_container, "anthropic",
+                             inputTokens=response.usage.input_tokens,
+                             outputTokens=response.usage.output_tokens)
+        except Exception as exc:
+            logger.warning("Failed to record anthropic usage: %s", exc)
 
         # Parse and store predictions (structured output returns pure JSON)
         raw_text = response.content[0].text  # type: ignore[union-attr]

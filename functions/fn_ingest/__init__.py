@@ -173,7 +173,7 @@ async def main(msg: func.QueueMessage) -> None:
         # Fetch group assignments from standings endpoint
         logger.info("Fetching group assignments from Football Data API...")
         team_to_group = await fetch_groups_from_standings(api_key)
-        await record_call(usage_container, "api-football")
+        await record_call(usage_container, "football-data")
         logger.info("Fetched %d group assignments from standings", len(team_to_group))
 
         # Fetch all fixtures for matchdays 1-3
@@ -181,7 +181,7 @@ async def main(msg: func.QueueMessage) -> None:
         all_fixtures = []
         for matchday in _MATCHDAYS:
             raw_fixtures = await fetch_matches_fd(api, http, matchday)
-            await record_call(usage_container, "api-football")
+            await record_call(usage_container, "football-data")
             all_fixtures.extend(raw_fixtures)
 
         # Fetch knockout stage fixtures
@@ -189,7 +189,7 @@ async def main(msg: func.QueueMessage) -> None:
         all_knockout: list[dict] = []
         for stage in KNOCKOUT_STAGES:
             raw_knockout = await fetch_knockout_matches_fd(api, http, stage)
-            await record_call(usage_container, "api-football")
+            await record_call(usage_container, "football-data")
             all_knockout.extend(raw_knockout)
         logger.info("Fetched %d knockout fixtures across %d stages", len(all_knockout), len(KNOCKOUT_STAGES))
 
@@ -199,7 +199,7 @@ async def main(msg: func.QueueMessage) -> None:
         if not existing or existing[0] == 0:
             logger.info("Teams container empty, fetching 2026 World Cup teams from Football Data API...")
             raw_teams = await fetch_teams_fd(api, http)
-            await record_call(usage_container, "api-football")
+            await record_call(usage_container, "football-data")
 
             logger.info("Processing %d teams into Cosmos DB documents", len(raw_teams))
             by_group: dict[str, list[str]] = {}

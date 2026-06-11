@@ -526,8 +526,8 @@ from datetime import date as _date
 
 USAGE_DOCS = [
     {
-        "id": f"usage-api-football-{_date.today().isoformat()}",
-        "provider": "api-football",
+        "id": f"usage-football-data-{_date.today().isoformat()}",
+        "provider": "football-data",
         "date": _date.today().isoformat(),
         "callCount": 8,
     },
@@ -540,8 +540,8 @@ USAGE_DOCS = [
         "outputTokens": 1500,
     },
     {
-        "id": f"usage-serper-{_date.today().isoformat()}",
-        "provider": "serper",
+        "id": f"usage-SerpApi-{_date.today().isoformat()}",
+        "provider": "SerpApi",
         "date": _date.today().isoformat(),
         "callCount": 96,
     },
@@ -559,7 +559,7 @@ def test_get_usage_returns_providers():
     body = _json_body(resp)
     assert "providers" in body
     names = [p["name"] for p in body["providers"]]
-    assert "api-football" in names
+    assert "football-data" in names
     assert "anthropic" in names
 
 
@@ -571,10 +571,18 @@ def test_get_usage_includes_limit_and_percent():
         resp = api_main(req)
 
     body = _json_body(resp)
-    af = next(p for p in body["providers"] if p["name"] == "api-football")
-    assert af["callCount"] == 8
-    assert af["limit"] == 100
-    assert af["percentUsed"] == pytest.approx(8.0)
+    # football-data uses a per-minute window — daily aggregate vs per-minute limit is not meaningful,
+    # so percentUsed is omitted; the limit is still included for informational display.
+    fd = next(p for p in body["providers"] if p["name"] == "football-data")
+    assert fd["callCount"] == 8
+    assert fd["limit"] == 10
+    assert "percentUsed" not in fd
+
+    # SerpApi has a monthly limit and should include percentUsed
+    serp = next(p for p in body["providers"] if p["name"] == "SerpApi")
+    assert serp["callCount"] == 96
+    assert serp["limit"] == 2500
+    assert serp["percentUsed"] == pytest.approx(3.84)
 
 
 def test_get_usage_returns_empty_providers_when_no_data():

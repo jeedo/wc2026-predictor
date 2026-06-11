@@ -175,7 +175,7 @@ async def _fetch_news_parallel(
             except Exception as e:
                 logger.warning("Failed to cache news for %s: %s", name, e)
         if snippets and usage_container is not None:
-            await record_call(usage_container, "serper")
+            await record_call(usage_container, "SerpApi")
 
     track_event("fn_predict/news_fetched", {
         "cached_count": str(len(cached)),

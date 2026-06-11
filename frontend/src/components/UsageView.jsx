@@ -14,16 +14,21 @@ function UsageBar({ percent }) {
 
 function ProviderCard({ provider }) {
   const { name, callCount, limit, window: win, percentUsed, inputTokens, outputTokens } = provider
+  const isMinute = win === 'minute'
+  const callLabel = win === 'month' ? 'Calls this month' : 'Calls today'
   return (
     <div className="provider-card">
       <h2 className="provider-name">{name}</h2>
       <div className="provider-stat">
-        <span className="stat-label">Calls today</span>
+        <span className="stat-label">{callLabel}</span>
         <span className="stat-value">
-          {limit != null ? `${callCount} / ${limit}` : callCount}
+          {!isMinute && limit != null ? `${callCount} / ${limit}` : callCount}
         </span>
       </div>
-      {limit != null && (
+      {isMinute && limit != null && (
+        <p className="usage-window">Rate limit: {limit}/min</p>
+      )}
+      {!isMinute && limit != null && percentUsed != null && (
         <>
           <UsageBar percent={percentUsed} />
           <p className="usage-window">{percentUsed}% of {win}ly limit</p>

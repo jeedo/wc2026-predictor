@@ -218,11 +218,70 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
 .accuracy-view > h2 { font-size: 1rem; font-weight: 700; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
 
+/* ---- Usage View ---- */
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.provider-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.provider-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--warning);
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.1rem;
+}
+.provider-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+.stat-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.stat-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  text-align: right;
+}
+.usage-bar-track {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.usage-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.usage-window {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: -0.1rem;
+}
+
 /* ---- Mobile ---- */
 @media (max-width: 600px) {
-  .header-inner { gap: 0.75rem; }
-  .app-logo { font-size: 1rem; }
-  .nav-btn { padding: 0.35rem 0.5rem; font-size: 0.8rem; }
+  .header-inner { gap: 0.5rem; overflow: hidden; }
+  .app-logo { font-size: 1rem; flex-shrink: 0; }
+  .app-nav { overflow-x: auto; -webkit-overflow-scrolling: touch; flex-shrink: 1; }
+  .nav-btn { padding: 0.35rem 0.5rem; font-size: 0.8rem; white-space: nowrap; flex-shrink: 0; }
 
   .fixture-row {
     grid-template-columns: 1fr auto 1fr;
