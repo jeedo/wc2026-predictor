@@ -136,10 +136,10 @@ h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
   border-radius: var(--radius); padding: 0.75rem 1rem;
 }
 .fixture-row .team { font-weight: 600; display: flex; flex-direction: column; gap: 0.15rem; }
-.fixture-row .team.home { align-items: flex-end; }
-.fixture-row .team.away { align-items: flex-start; }
-.fixture-row .team-flag { font-size: 1.6rem; line-height: 1; }
-.fixture-row .team-name-text { font-size: 0.85rem; }
+.fixture-row .team.home { align-items: center; }
+.fixture-row .team.away { align-items: center; }
+.fixture-row .team-flag { font-size: 3.2rem; line-height: 1; }
+.fixture-row .team-name-text { font-size: 0.85rem; text-align: center; }
 .fixture-row .score { text-align: center; font-size: 1.1rem; font-weight: 700; min-width: 60px; }
 .fixture-row .kickoff { font-size: 0.8rem; color: var(--text-muted); }
 .fixture-row .predicted-score { display: flex; flex-direction: column; align-items: center; gap: 0.1rem; opacity: 0.85; }

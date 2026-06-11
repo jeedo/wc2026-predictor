@@ -72,9 +72,22 @@ function MatchdayFixtures({ matchday }) {
   const { data, loading, error } = useFetch(`${API_BASE}/api/fixtures/${matchday}`)
 
   if (loading) return (
-    <phantom-ui loading="" count="8" count-gap="0.5rem">
-      <div className="fixture-row" style={{ minHeight: '56px' }} />
-    </phantom-ui>
+    <div className="fixtures-list">
+      <phantom-ui loading={true} count={8} count-gap={8}>
+        <div className="fixture-row">
+          <span className="team home">
+            <span className="team-flag">🏳️</span>
+            <span className="team-name-text">Team Name</span>
+          </span>
+          <div className="score">1 – 0</div>
+          <span className="team away">
+            <span className="team-flag">🏳️</span>
+            <span className="team-name-text">Team Name</span>
+          </span>
+          <span className="status-badge">FT</span>
+        </div>
+      </phantom-ui>
+    </div>
   )
   if (error) return <p className="status error">Error: {error}</p>
   if (!data?.fixtures?.length) return <p className="status">No fixtures for Matchday {matchday}.</p>
@@ -125,9 +138,22 @@ function KnockoutFixtures() {
   }, [predData])
 
   if (predLoading) return (
-    <phantom-ui loading="" count="4" count-gap="0.5rem">
-      <div className="fixture-row" style={{ minHeight: '56px' }} />
-    </phantom-ui>
+    <div className="fixtures-list">
+      <phantom-ui loading="" count="4" count-gap="0.5rem">
+        <div className="fixture-row">
+          <span className="team home">
+            <span className="team-flag">🏳️</span>
+            <span className="team-name-text">Team Name</span>
+          </span>
+          <div className="score">1 – 0</div>
+          <span className="team away">
+            <span className="team-flag">🏳️</span>
+            <span className="team-name-text">Team Name</span>
+          </span>
+          <span className="status-badge">FT</span>
+        </div>
+      </phantom-ui>
+    </div>
   )
 
   if (predData && !predData.knockout?.length) {
