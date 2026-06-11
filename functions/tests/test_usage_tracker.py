@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from shared.usage_tracker import record_call, PROVIDER_LIMITS
+from shared.usage_tracker import record_call, record_call_sync, PROVIDER_LIMITS
 from azure.cosmos.exceptions import CosmosResourceNotFoundError
 
 
@@ -85,4 +85,51 @@ async def test_record_call_noop_when_container_is_none():
 def test_provider_limits_has_known_providers():
     assert "football-data" in PROVIDER_LIMITS
     assert "anthropic" in PROVIDER_LIMITS
-    assert "serper" in PROVIDER_LIMITS
+    assert "SerpApi" in PROVIDER_LIMITS
+
+
+def _make_sync_container(existing_doc=None):
+    container = MagicMock()
+    if existing_doc is None:
+        container.read_item = MagicMock(
+            side_effect=CosmosResourceNotFoundError(message="not found", response=MagicMock())
+        )
+    else:
+        container.read_item = MagicMock(return_value=existing_doc)
+    container.upsert_item = MagicMock()
+    return container
+
+
+def test_record_call_sync_creates_new_doc():
+    container = _make_sync_container()
+    record_call_sync(container, "anthropic", inputTokens=1000, outputTokens=200)
+
+    container.upsert_item.assert_called_once()
+    doc = container.upsert_item.call_args[1]["body"]
+    assert doc["provider"] == "anthropic"
+    assert doc["callCount"] == 1
+    assert doc["inputTokens"] == 1000
+    assert doc["outputTokens"] == 200
+    assert doc["date"] == date.today().isoformat()
+
+
+def test_record_call_sync_increments_existing():
+    existing = {
+        "id": f"usage-anthropic-{date.today().isoformat()}",
+        "provider": "anthropic",
+        "date": date.today().isoformat(),
+        "callCount": 3,
+        "inputTokens": 5000,
+        "outputTokens": 400,
+    }
+    container = _make_sync_container(existing_doc=existing)
+    record_call_sync(container, "anthropic", inputTokens=500, outputTokens=100)
+
+    doc = container.upsert_item.call_args[1]["body"]
+    assert doc["callCount"] == 4
+    assert doc["inputTokens"] == 5500
+    assert doc["outputTokens"] == 500
+
+
+def test_record_call_sync_noop_when_container_is_none():
+    record_call_sync(None, "anthropic")

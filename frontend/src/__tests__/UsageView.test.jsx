@@ -5,9 +5,9 @@ import UsageView from '../components/UsageView'
 const USAGE_DATA = {
   asOf: '2026-06-03T10:00:00Z',
   providers: [
-    { name: 'football-data', callCount: 8, limit: 10, window: 'minute', percentUsed: 80.0 },
+    { name: 'football-data', callCount: 8, limit: 10, window: 'minute' },
     { name: 'anthropic', callCount: 2, inputTokens: 20000, outputTokens: 1500, limit: null, window: 'day' },
-    { name: 'serper', callCount: 96, limit: 2500, window: 'month', percentUsed: 3.84 },
+    { name: 'SerpApi', callCount: 96, limit: 2500, window: 'month', percentUsed: 3.84 },
   ],
 }
 
@@ -28,7 +28,7 @@ test('renders provider names after load', async () => {
   await waitFor(() => {
     expect(screen.getByText(/football-data/i)).toBeInTheDocument()
     expect(screen.getByText(/anthropic/i)).toBeInTheDocument()
-    expect(screen.getByText(/serper/i)).toBeInTheDocument()
+    expect(screen.getByText(/SerpApi/i)).toBeInTheDocument()
   })
 })
 
@@ -39,7 +39,10 @@ test('shows call counts and limits', async () => {
   }))
   render(<UsageView />)
   await waitFor(() => {
-    expect(screen.getByText(/8\s*\/\s*10/)).toBeInTheDocument()
+    // SerpApi has a monthly window and shows count/limit
+    expect(screen.getByText(/96\s*\/\s*2500/)).toBeInTheDocument()
+    // football-data has a minute window — shows rate limit info, not count/limit ratio
+    expect(screen.getByText(/Rate limit: 10\/min/i)).toBeInTheDocument()
   })
 })
 
