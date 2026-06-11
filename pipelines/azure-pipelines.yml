@@ -28,6 +28,10 @@ stages:
         pool:
           vmImage: ubuntu-latest
         steps:
+          - bash: |
+              echo "##vso[task.setvariable variable=commitSubject]$(echo '$(Build.SourceVersionMessage)' | head -1)"
+            displayName: 'Extract commit subject line'
+
           - task: SendTelegramNotification@0
             displayName: 'Notify Telegram: pipeline started'
             inputs:
@@ -38,7 +42,7 @@ stages:
               message: |
                 🚀 <b>Pipeline started</b>
                 Branch: <code>$(Build.SourceBranchName)</code>
-                Commit: <code>$(Build.SourceVersion)</code>
+                Commit: <code>$(Build.SourceVersion)</code> — $(commitSubject)
 
           - task: AzureCLI@2
             displayName: 'Deploy main.bicep'
