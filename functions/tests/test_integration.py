@@ -142,7 +142,7 @@ async def test_ingest_seeds_teams_and_upserts_fixture():
 
     assert len(teams_db._docs) == 48, "All 48 teams should be seeded"
     assert "fixture-1001" in fixtures_db._docs, "Fixture should be upserted"
-    assert queue.size == 0, "No queue message for a non-finished fixture"
+    assert queue.size == 1, "New fixture (first time in DB) should trigger a prediction"
 
 
 # ---------------------------------------------------------------------------
@@ -180,8 +180,9 @@ async def test_ingest_enqueues_message_on_finish():
     assert queue.size == 1, "Exactly one message should be enqueued"
     raw = await queue.receive_one()
     payload = json.loads(raw)
-    assert payload["matchday"] == 1
-    assert payload["fixtureId"] == 1001
+    assert payload["matchday"] == "full"
+    assert "triggerReasons" in payload
+    assert any("ft" in r for r in payload["triggerReasons"])
 
 
 # ---------------------------------------------------------------------------
@@ -328,5 +329,4 @@ async def test_full_pipeline_end_to_end():
 
     assert resp.status_code == 200
     body = json.loads(resp.get_body())
-    assert body["matchday"] == 1
     assert len(body["groups"]) == 12

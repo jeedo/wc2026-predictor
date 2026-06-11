@@ -40,6 +40,36 @@ def test_should_enqueue_true_on_first_insert_finished():
     assert _should_enqueue(old_status=None, new_status="FT") is True
 
 
+def test_should_enqueue_true_for_new_fixture():
+    # Any status is fine for a brand-new fixture
+    assert _should_enqueue(None, "NS") is True
+
+
+def test_should_enqueue_true_for_tbd_to_known_teams():
+    assert _should_enqueue("NS", "NS",
+                           prev_home="TBD", prev_away="TBD",
+                           new_home="Brazil", new_away="Germany") is True
+
+
+def test_should_enqueue_true_when_one_team_still_tbd():
+    assert _should_enqueue("NS", "NS",
+                           prev_home="TBD", prev_away="Argentina",
+                           new_home="Brazil", new_away="Argentina") is True
+
+
+def test_should_enqueue_false_when_teams_already_known():
+    assert _should_enqueue("NS", "NS",
+                           prev_home="Brazil", prev_away="Germany",
+                           new_home="Brazil", new_away="Germany") is False
+
+
+def test_should_enqueue_false_when_new_team_still_tbd():
+    # Only one side resolved — don't trigger until both are known
+    assert _should_enqueue("NS", "NS",
+                           prev_home="TBD", prev_away="TBD",
+                           new_home="Brazil", new_away="TBD") is False
+
+
 # ---------------------------------------------------------------------------
 # _build_fixture_doc
 # ---------------------------------------------------------------------------
@@ -146,8 +176,9 @@ async def test_ingest_enqueues_on_finished_transition():
 
     mock_queue.send_message.assert_called_once()
     msg_payload = json.loads(mock_queue.send_message.call_args[0][0])
-    assert msg_payload["matchday"] == 1
-    assert msg_payload["fixtureId"] == 101
+    assert msg_payload["matchday"] == "full"
+    assert "triggerReasons" in msg_payload
+    assert any("ft" in r for r in msg_payload["triggerReasons"])
 
 
 # ---------------------------------------------------------------------------
@@ -227,8 +258,10 @@ async def test_ingest_logs_enqueue_event(caplog):
     messages = [r.message for r in caplog.records]
     assert any("enqueue" in m.lower() or "predict" in m.lower() for m in messages), \
         f"Expected log mentioning predict queue enqueue, got: {messages}"
-    assert any("matchday" in m.lower() and "1" in m for m in messages if "enqueue" in m.lower() or "predict" in m.lower()), \
-        f"Expected enqueue log to include matchday, got: {messages}"
+    enqueue_logs = [m for m in messages if "enqueue" in m.lower()]
+    assert enqueue_logs, f"Expected at least one enqueue log, got: {messages}"
+    assert any("reason" in m.lower() or "trigger" in m.lower() for m in enqueue_logs), \
+        f"Expected enqueue log to describe the trigger reason, got: {enqueue_logs}"
 
 
 # ---------------------------------------------------------------------------
@@ -569,12 +602,149 @@ async def test_ingest_enqueues_on_finished_knockout():
     ):
         await ingest_main(timer)
 
-    mock_queue.send_message.assert_called()
-    sent_messages = [
-        json.loads(call[0][0]) for call in mock_queue.send_message.call_args_list
+    mock_queue.send_message.assert_called_once()
+    sent = json.loads(mock_queue.send_message.call_args[0][0])
+    assert sent["matchday"] == "full"
+    assert "triggerReasons" in sent
+    assert any("ft" in r for r in sent["triggerReasons"])
+
+
+# ---------------------------------------------------------------------------
+# Deduplication — at most one trigger per ingest run (issue #45)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ingest_enqueues_once_for_multiple_new_fixtures():
+    """Multiple new NS fixtures → exactly one queue message sent."""
+    timer = _queue_msg_mock()
+
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([1]))
+
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.read_item = AsyncMock(side_effect=Exception("not found"))
+    mock_fixtures_container.upsert_item = AsyncMock()
+
+    mock_queue = AsyncMock()
+    mock_queue.send_message = AsyncMock()
+
+    ns_fixtures = [
+        {"id": i, "utcDate": "2026-06-12T15:00:00Z", "status": "SCHEDULED",
+         "matchday": 1, "homeTeam": {"id": i, "name": f"Team{i}"},
+         "awayTeam": {"id": i + 1, "name": f"Team{i+1}"},
+         "score": {"fullTime": {"home": None, "away": None}}}
+        for i in range(1, 4)
     ]
-    knockout_trigger = next(
-        (m for m in sent_messages if m.get("fixtureId") == 537417), None
+
+    async def _md1_only(_api, _http, matchday):
+        return ns_fixtures if matchday == 1 else []
+
+    with (
+        patch("fn_ingest.get_containers", return_value=(mock_teams_container, mock_fixtures_container)),
+        patch("fn_ingest.get_queue_client", return_value=mock_queue),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_matches_fd", side_effect=_md1_only),
+        patch("fn_ingest.fetch_knockout_matches_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
+    ):
+        await ingest_main(timer)
+
+    mock_queue.send_message.assert_called_once()
+    sent = json.loads(mock_queue.send_message.call_args[0][0])
+    assert sent["matchday"] == "full"
+    assert len(sent["triggerReasons"]) == 3  # one reason per new fixture, but only one message
+
+
+@pytest.mark.asyncio
+async def test_ingest_enqueues_on_knockout_teams_becoming_known():
+    """Knockout fixture where homeTeam was TBD → real name triggers one message."""
+    timer = _queue_msg_mock()
+
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([1]))
+
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.read_item = AsyncMock(
+        return_value={"id": "fixture-537417", "status": "NS", "homeTeam": "TBD", "awayTeam": "TBD"}
     )
-    assert knockout_trigger is not None, "Expected a predict trigger for the finished knockout fixture"
-    assert knockout_trigger["matchday"] == "LAST_32"
+    mock_fixtures_container.upsert_item = AsyncMock()
+
+    mock_queue = AsyncMock()
+    mock_queue.send_message = AsyncMock()
+
+    tbd_resolved_knockout = {
+        "id": 537417,
+        "utcDate": "2026-06-28T19:00:00Z",
+        "status": "TIMED",
+        "matchday": None,
+        "stage": "LAST_32",
+        "group": None,
+        "homeTeam": {"id": 10, "name": "Brazil"},
+        "awayTeam": {"id": 20, "name": "Argentina"},
+        "score": {"fullTime": {"home": None, "away": None}},
+    }
+
+    async def _knockout_stub(_api, _http, stage):
+        return [tbd_resolved_knockout] if stage == "LAST_32" else []
+
+    with (
+        patch("fn_ingest.get_containers", return_value=(mock_teams_container, mock_fixtures_container)),
+        patch("fn_ingest.get_queue_client", return_value=mock_queue),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_matches_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_knockout_matches_fd", side_effect=_knockout_stub),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
+    ):
+        await ingest_main(timer)
+
+    mock_queue.send_message.assert_called_once()
+    sent = json.loads(mock_queue.send_message.call_args[0][0])
+    assert sent["matchday"] == "full"
+    assert any("teams_known" in r for r in sent["triggerReasons"])
+
+
+@pytest.mark.asyncio
+async def test_ingest_no_trigger_when_no_changes():
+    """Fixtures already in DB with same status and teams → no queue message."""
+    timer = _queue_msg_mock()
+
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([1]))
+
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.read_item = AsyncMock(
+        return_value={"id": "fixture-101", "status": "NS",
+                      "homeTeam": "Germany", "awayTeam": "Mexico"}
+    )
+    mock_fixtures_container.upsert_item = AsyncMock()
+
+    mock_queue = AsyncMock()
+    mock_queue.send_message = AsyncMock()
+
+    unchanged_fixture = {
+        "id": 101,
+        "utcDate": "2026-06-12T15:00:00Z",
+        "status": "SCHEDULED",
+        "matchday": 1,
+        "homeTeam": {"id": 1, "name": "Germany"},
+        "awayTeam": {"id": 2, "name": "Mexico"},
+        "score": {"fullTime": {"home": None, "away": None}},
+    }
+
+    with (
+        patch("fn_ingest.get_containers", return_value=(mock_teams_container, mock_fixtures_container)),
+        patch("fn_ingest.get_queue_client", return_value=mock_queue),
+        patch("fn_ingest._get_football_data_api_key", return_value="test-key"),
+        patch("fn_ingest.FootballDataClient", return_value=MagicMock()),
+        patch("fn_ingest.fetch_teams_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_matches_fd", AsyncMock(return_value=[unchanged_fixture])),
+        patch("fn_ingest.fetch_knockout_matches_fd", AsyncMock(return_value=[])),
+        patch("fn_ingest.fetch_groups_from_standings", AsyncMock(return_value={})),
+    ):
+        await ingest_main(timer)
+
+    mock_queue.send_message.assert_not_called()
