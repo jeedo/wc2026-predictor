@@ -45,8 +45,8 @@ test('renders matchday tab selector', async () => {
 test('shows fixtures for the selected matchday', async () => {
   render(<FixturesView />)
   await waitFor(() => {
-    expect(screen.getByText('Germany')).toBeInTheDocument()
-    expect(screen.getByText('Mexico')).toBeInTheDocument()
+    expect(screen.getByText(/Germany/)).toBeInTheDocument()
+    expect(screen.getByText(/Mexico/)).toBeInTheDocument()
   })
 })
 
@@ -69,18 +69,18 @@ test('switching tab loads different matchday', async () => {
   const user = userEvent.setup()
   render(<FixturesView />)
 
-  await waitFor(() => screen.getByText('Germany'))
+  await waitFor(() => screen.getByText(/Germany/))
 
   await user.click(screen.getByRole('tab', { name: /matchday 2/i }))
 
   await waitFor(() => {
-    expect(screen.getByText('France')).toBeInTheDocument()
+    expect(screen.getByText(/France/)).toBeInTheDocument()
   })
 })
 
 test('shows loading state initially', () => {
   render(<FixturesView />)
-  expect(screen.getByText(/loading/i)).toBeInTheDocument()
+  expect(document.querySelector('phantom-ui')).toBeInTheDocument()
 })
 
 test('shows error when fetch fails', async () => {
@@ -112,8 +112,8 @@ test('shows kickoff time alongside predicted score', async () => {
   render(<FixturesView />)
   await waitFor(() => {
     // Should show both predicted score and kickoff time for Brazil vs Argentina
-    expect(screen.getByText('Brazil')).toBeInTheDocument()
-    expect(screen.getByText('Argentina')).toBeInTheDocument()
+    expect(screen.getByText(/Brazil/)).toBeInTheDocument()
+    expect(screen.getByText(/Argentina/)).toBeInTheDocument()
     // Predicted score is shown with confidence
     expect(screen.getByText('(pred · medium)')).toBeInTheDocument()
   })
@@ -123,8 +123,8 @@ test('shows only kickoff time for upcoming matches without predictions', async (
   render(<FixturesView />)
   await waitFor(() => {
     // France vs Spain has no predictions, should show kickoff time
-    expect(screen.getByText('France')).toBeInTheDocument()
-    expect(screen.getByText('Spain')).toBeInTheDocument()
+    expect(screen.getByText(/France/)).toBeInTheDocument()
+    expect(screen.getByText(/Spain/)).toBeInTheDocument()
   })
 })
 

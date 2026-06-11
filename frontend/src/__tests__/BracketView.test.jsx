@@ -59,8 +59,8 @@ test('shows team names from predictions', async () => {
   render(<BracketView />)
   await waitFor(() => {
     // France appears in multiple rounds; getAllByText handles that
-    expect(screen.getAllByText('France').length).toBeGreaterThan(0)
-    expect(screen.getByText('Brazil')).toBeInTheDocument()
+    expect(screen.getAllByText(/France/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Brazil/)).toBeInTheDocument()
   })
 })
 
@@ -91,7 +91,7 @@ test('shows loading state initially', () => {
     ok: true, json: () => new Promise(() => {}),
   }))
   render(<BracketView />)
-  expect(screen.getByText(/loading/i)).toBeInTheDocument()
+  expect(document.querySelector('phantom-ui')).toBeInTheDocument()
 })
 
 test('shows error when fetch fails', async () => {

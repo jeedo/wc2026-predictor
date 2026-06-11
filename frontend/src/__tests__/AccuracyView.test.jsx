@@ -67,7 +67,7 @@ test('shows predicted and actual values', async () => {
 
 test('shows loading state initially', () => {
   render(<AccuracyView />)
-  expect(screen.getByText(/loading/i)).toBeInTheDocument()
+  expect(document.querySelector('phantom-ui')).toBeInTheDocument()
 })
 
 test('shows 404 message when no data', async () => {

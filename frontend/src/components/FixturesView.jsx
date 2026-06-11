@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useFetch } from '../hooks/useFetch'
+import { getFlag } from '../utils/teamFlags'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 const MATCHDAYS = [1, 2, 3]
@@ -35,8 +36,8 @@ function FixtureRow({
 
   return (
     <div className={`fixture-row ${status.toLowerCase()}`}>
-      <span className="team home">{homeTeam ?? 'TBD'}</span>
-      <span className="score">
+      <span className="team home">{getFlag(homeTeam)} {homeTeam ?? 'TBD'}</span>
+      <div className="score">
         {finished || live ? (
           `${homeScore} – ${awayScore}`
         ) : upcoming && hasPrediction ? (
@@ -52,8 +53,8 @@ function FixtureRow({
         ) : (
           <span className="kickoff">{dateStr} {timeStr}</span>
         )}
-      </span>
-      <span className="team away">{awayTeam ?? 'TBD'}</span>
+      </div>
+      <span className="team away">{awayTeam ?? 'TBD'} {getFlag(awayTeam)}</span>
       <span className={`status-badge ${live ? 'live' : ''}`}>
         {finished ? 'FT' : live ? status : 'Upcoming'}
       </span>
@@ -64,7 +65,11 @@ function FixtureRow({
 function MatchdayFixtures({ matchday }) {
   const { data, loading, error } = useFetch(`${API_BASE}/api/fixtures/${matchday}`)
 
-  if (loading) return <p className="status">Loading…</p>
+  if (loading) return (
+    <phantom-ui loading="" count="8" count-gap="0.5rem">
+      <div className="fixture-row" style={{ minHeight: '56px' }} />
+    </phantom-ui>
+  )
   if (error) return <p className="status error">Error: {error}</p>
   if (!data?.fixtures?.length) return <p className="status">No fixtures for Matchday {matchday}.</p>
 
@@ -113,7 +118,11 @@ function KnockoutFixtures() {
     return map
   }, [predData])
 
-  if (predLoading) return <p className="status">Loading…</p>
+  if (predLoading) return (
+    <phantom-ui loading="" count="4" count-gap="0.5rem">
+      <div className="fixture-row" style={{ minHeight: '56px' }} />
+    </phantom-ui>
+  )
 
   if (predData && !predData.knockout?.length) {
     return (

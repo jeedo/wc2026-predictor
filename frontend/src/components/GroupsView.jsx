@@ -1,29 +1,9 @@
 import { useState } from 'react'
 import { useFetch } from '../hooks/useFetch'
 import TeamNewsModal from './TeamNewsModal'
+import { getFlag } from '../utils/teamFlags'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
-
-const FLAGS = {
-  'Algeria': '🇩🇿', 'Argentina': '🇦🇷', 'Australia': '🇦🇺', 'Austria': '🇦🇹',
-  'Belgium': '🇧🇪', 'Bosnia-Herzegovina': '🇧🇦', 'Bosnia and Herzegovina': '🇧🇦',
-  'Brazil': '🇧🇷', 'Canada': '🇨🇦', 'Cape Verde': '🇨🇻', 'Cape Verde Islands': '🇨🇻',
-  'Colombia': '🇨🇴', 'Congo DR': '🇨🇩', 'DR Congo': '🇨🇩', 'Croatia': '🇭🇷',
-  'Curaçao': '🇨🇼', 'Curacao': '🇨🇼', 'Czechia': '🇨🇿', 'Czech Republic': '🇨🇿',
-  'Ecuador': '🇪🇨', 'Egypt': '🇪🇬', 'England': '🏴󠁧󠁢󠁥󠁮󠁧󠁿', 'France': '🇫🇷',
-  'Germany': '🇩🇪', 'Ghana': '🇬🇭', 'Haiti': '🇭🇹', 'Iran': '🇮🇷',
-  'Iraq': '🇮🇶', 'Ivory Coast': '🇨🇮', "Côte d'Ivoire": '🇨🇮', 'Japan': '🇯🇵',
-  'Jordan': '🇯🇴', 'Mexico': '🇲🇽', 'Morocco': '🇲🇦', 'Netherlands': '🇳🇱',
-  'New Zealand': '🇳🇿', 'Norway': '🇳🇴', 'Panama': '🇵🇦', 'Paraguay': '🇵🇾',
-  'Portugal': '🇵🇹', 'Qatar': '🇶🇦', 'Saudi Arabia': '🇸🇦', 'Scotland': '🏴󠁧󠁢󠁳󠁣󠁴󠁿',
-  'Senegal': '🇸🇳', 'South Africa': '🇿🇦', 'South Korea': '🇰🇷', 'Spain': '🇪🇸',
-  'Sweden': '🇸🇪', 'Switzerland': '🇨🇭', 'Tunisia': '🇹🇳', 'Turkey': '🇹🇷',
-  'Türkiye': '🇹🇷', 'United States': '🇺🇸', 'Uruguay': '🇺🇾', 'Uzbekistan': '🇺🇿',
-}
-
-function getFlag(name) {
-  return FLAGS[name] ?? ''
-}
 
 function NewsButton({ team, onClick }) {
   return (
@@ -111,7 +91,16 @@ export default function GroupsView() {
   const groups = useFetch(`${API_BASE}/api/groups`)
   const predictions = useFetch(`${API_BASE}/api/predictions`)
 
-  if (groups.loading) return <p className="status">Loading groups…</p>
+  if (groups.loading || predictions.loading) return (
+    <section className="groups-view">
+      <h1>Group Stage</h1>
+      <div className="group-grid">
+        {Array.from({ length: 12 }).map((_, i) => (
+          <div key={i} className="group-card group-card--skeleton" />
+        ))}
+      </div>
+    </section>
+  )
   if (groups.error) return <p className="status error">Error: {groups.error}</p>
   if (!groups.data?.groups?.length) return <p className="status">No group data yet.</p>
 
