@@ -78,7 +78,7 @@ test('shows confidence badge next to winner', async () => {
 test('shows loading state initially', () => {
   vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})))
   render(<GroupsView />)
-  expect(screen.getByText(/loading/i)).toBeInTheDocument()
+  expect(document.querySelectorAll('.group-card--skeleton').length).toBe(12)
 })
 
 test('shows error when groups fetch fails', async () => {

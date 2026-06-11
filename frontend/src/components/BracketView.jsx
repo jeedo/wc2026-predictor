@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { useFetch } from '../hooks/useFetch'
+import { getFlag } from '../utils/teamFlags'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -17,11 +18,11 @@ function MatchCard({ homeTeam, awayTeam, predictedWinner, predictedHomeScore, pr
   return (
     <div className="bracket-match">
       <div className={`bracket-team ${predictedWinner === homeTeam ? 'winner' : ''}`}>
-        <span className="bracket-team-name">{homeTeam ?? 'TBD'}</span>
+        <span className="bracket-team-name">{getFlag(homeTeam)} {homeTeam ?? 'TBD'}</span>
         {hasPred && <span className="bracket-team-score">{predictedHomeScore}</span>}
       </div>
       <div className={`bracket-team ${predictedWinner === awayTeam ? 'winner' : ''}`}>
-        <span className="bracket-team-name">{awayTeam ?? 'TBD'}</span>
+        <span className="bracket-team-name">{getFlag(awayTeam)} {awayTeam ?? 'TBD'}</span>
         {hasPred && <span className="bracket-team-score">{predictedAwayScore}</span>}
       </div>
       {hasPred && confidence && (
@@ -40,7 +41,11 @@ export default function BracketView() {
     return map
   }, [data])
 
-  if (loading) return <p className="status">Loading bracket…</p>
+  if (loading) return (
+    <phantom-ui loading="" count="4" count-gap="0.6rem">
+      <div className="bracket-match" style={{ minHeight: '80px' }} />
+    </phantom-ui>
+  )
   if (error) return <p className="status error">Error: {error}</p>
 
   const hasKnockout = data?.knockout?.length > 0
