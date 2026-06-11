@@ -58,8 +58,26 @@ def _get_football_data_api_key() -> str:
 # Helpers (kept module-level so tests can import them directly)
 # ---------------------------------------------------------------------------
 
-def _should_enqueue(old_status: str | None, new_status: str) -> bool:
-    return new_status == "FT" and old_status != "FT"
+_TBD = (None, "TBD", "")
+
+
+def _should_enqueue(
+    old_status: str | None,
+    new_status: str,
+    *,
+    prev_home: str | None = None,
+    prev_away: str | None = None,
+    new_home: str = "",
+    new_away: str = "",
+) -> bool:
+    if old_status is None:                                              # new fixture
+        return True
+    if new_status == "FT" and old_status != "FT":                      # match finished
+        return True
+    if (prev_home in _TBD or prev_away in _TBD) and \
+       (new_home not in _TBD and new_away not in _TBD):                # knockout teams resolved
+        return True
+    return False
 
 
 def _build_fixture_doc(raw: dict[str, Any]) -> dict[str, Any]:
@@ -221,12 +239,11 @@ async def main(msg: func.QueueMessage) -> None:
         # Upsert fixtures for all three matchdays
         logger.info("Upserting fixtures for matchdays 1-3...")
         total_upserted = 0
-        total_enqueued = 0
         fixture_summary = {}
+        trigger_reasons: list[str] = []
 
         for matchday in _MATCHDAYS:
             logger.info("Processing matchday %d", matchday)
-            # Filter pre-fetched fixtures by matchday
             matchday_fixtures = [f for f in all_fixtures if f.get("matchday") == matchday]
 
             if not matchday_fixtures:
@@ -234,47 +251,42 @@ async def main(msg: func.QueueMessage) -> None:
                 continue
 
             logger.info("Processing %d fixtures for matchday %d", len(matchday_fixtures), matchday)
-            fixture_summary[matchday] = {"count": len(matchday_fixtures), "enqueued": 0}
+            fixture_summary[matchday] = {"count": len(matchday_fixtures)}
 
             for raw in matchday_fixtures:
                 doc = _build_fixture_doc(raw)
                 fixture_id = doc["id"]
                 partition_key = doc["matchday"]
 
-                # Log fixture details
-                home_team = doc.get("homeTeam", "Unknown")
-                away_team = doc.get("awayTeam", "Unknown")
-                logger.debug("Upserting fixture: %s vs %s (MD%d)", home_team, away_team, matchday)
+                logger.debug("Upserting fixture: %s vs %s (MD%d)",
+                             doc.get("homeTeam"), doc.get("awayTeam"), matchday)
 
-                # Determine previous status for transition detection
                 try:
-                    prev = await read_item(
-                        fixtures_container, fixture_id, partition_key
-                    )
+                    prev = await read_item(fixtures_container, fixture_id, partition_key)
                     prev_status: str | None = prev.get("status")
+                    prev_home: str | None = prev.get("homeTeam")
+                    prev_away: str | None = prev.get("awayTeam")
                 except Exception:
                     prev_status = None
+                    prev_home = None
+                    prev_away = None
 
                 await upsert_item(fixtures_container, doc)
                 total_upserted += 1
 
-                if _should_enqueue(prev_status, doc["status"]):
-                    message = json.dumps(
-                        {"matchday": matchday, "fixtureId": doc["fixtureId"], "correlationId": correlation_id}
-                    ).encode()
-                    await queue.send_message(message)
-                    total_enqueued += 1
-                    fixture_summary[matchday]["enqueued"] += 1
-                    logger.info(
-                        "Enqueued prediction trigger for %s vs %s (MD%d)",
-                        home_team,
-                        away_team,
-                        matchday,
-                    )
+                if _should_enqueue(prev_status, doc["status"],
+                                   prev_home=prev_home, prev_away=prev_away,
+                                   new_home=doc["homeTeam"], new_away=doc["awayTeam"]):
+                    if prev_status is None:
+                        reason = f"new_fixture_md{matchday}"
+                    elif doc["status"] == "FT":
+                        reason = f"ft_md{matchday}"
+                    else:
+                        reason = f"teams_known_md{matchday}"
+                    trigger_reasons.append(reason)
 
         # Upsert knockout fixtures
         knockout_upserted = 0
-        knockout_enqueued = 0
         for raw in all_knockout:
             doc = _build_fixture_doc(raw)
             fixture_id = doc["id"]
@@ -284,30 +296,49 @@ async def main(msg: func.QueueMessage) -> None:
             try:
                 prev = await read_item(fixtures_container, fixture_id, partition_key)
                 prev_status = prev.get("status")
+                prev_home = prev.get("homeTeam")
+                prev_away = prev.get("awayTeam")
             except Exception:
                 prev_status = None
+                prev_home = None
+                prev_away = None
 
             await upsert_item(fixtures_container, doc)
             knockout_upserted += 1
 
-            if _should_enqueue(prev_status, doc["status"]):
-                message = json.dumps(
-                    {"matchday": stage_name, "fixtureId": doc["fixtureId"], "correlationId": correlation_id}
-                ).encode()
-                await queue.send_message(message)
-                knockout_enqueued += 1
-                logger.info(
-                    "Enqueued prediction trigger for knockout %s vs %s (%s)",
-                    doc.get("homeTeam"), doc.get("awayTeam"), stage_name,
-                )
+            if _should_enqueue(prev_status, doc["status"],
+                               prev_home=prev_home, prev_away=prev_away,
+                               new_home=doc["homeTeam"], new_away=doc["awayTeam"]):
+                if prev_status is None:
+                    reason = f"new_fixture_{stage_name}"
+                elif doc["status"] == "FT":
+                    reason = f"ft_{stage_name}"
+                else:
+                    reason = f"teams_known_{stage_name}"
+                trigger_reasons.append(reason)
 
         total_upserted += knockout_upserted
-        total_enqueued += knockout_enqueued
-        logger.info("Knockout ingest: %d fixtures upserted, %d triggers enqueued", knockout_upserted, knockout_enqueued)
+        logger.info("Knockout ingest: %d fixtures upserted", knockout_upserted)
+
+        # Send at most one prediction trigger per ingest run
+        if trigger_reasons:
+            message = json.dumps({
+                "matchday": "full",
+                "correlationId": correlation_id,
+                "triggerReasons": trigger_reasons[:20],
+            }).encode()
+            await queue.send_message(message)
+            total_enqueued = 1
+            logger.info(
+                "Enqueued 1 prediction trigger — %d reason(s): %s",
+                len(trigger_reasons), trigger_reasons[:5],
+            )
+        else:
+            total_enqueued = 0
 
         logger.info("Ingest complete: %d fixtures upserted, %d prediction triggers enqueued", total_upserted, total_enqueued)
         for matchday in sorted(fixture_summary.keys()):
             info = fixture_summary[matchday]
-            logger.info("  Matchday %d: %d fixtures (%d enqueued)", matchday, info["count"], info["enqueued"])
+            logger.info("  Matchday %d: %d fixtures", matchday, info["count"])
 
     logger.info("fn_ingest completed successfully")
