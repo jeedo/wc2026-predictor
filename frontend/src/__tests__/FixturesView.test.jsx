@@ -96,7 +96,7 @@ test('shows predicted score for upcoming matches with predictions', async () => 
   await waitFor(() => {
     // Brazil vs Argentina has predictedHomeScore: 2, predictedAwayScore: 1
     expect(screen.getByText('2 – 1')).toBeInTheDocument()
-    expect(screen.getByText('(pred · medium)')).toBeInTheDocument()
+    expect(screen.getByText('pred · medium')).toBeInTheDocument()
   })
 })
 
@@ -104,7 +104,7 @@ test('shows confidence level in predicted score', async () => {
   render(<FixturesView />)
   await waitFor(() => {
     // Brazil vs Argentina has predictedConfidence: 'medium'
-    expect(screen.getByText('(pred · medium)')).toBeInTheDocument()
+    expect(screen.getByText('pred · medium')).toBeInTheDocument()
   })
 })
 
@@ -114,8 +114,8 @@ test('shows kickoff time alongside predicted score', async () => {
     // Should show both predicted score and kickoff time for Brazil vs Argentina
     expect(screen.getByText(/Brazil/)).toBeInTheDocument()
     expect(screen.getByText(/Argentina/)).toBeInTheDocument()
-    // Predicted score is shown with confidence
-    expect(screen.getByText('(pred · medium)')).toBeInTheDocument()
+    // Predicted score is shown with confidence on its own line
+    expect(screen.getByText('pred · medium')).toBeInTheDocument()
   })
 })
 
