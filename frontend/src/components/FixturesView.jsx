@@ -36,16 +36,19 @@ function FixtureRow({
 
   return (
     <div className={`fixture-row ${status.toLowerCase()}`}>
-      <span className="team home">{getFlag(homeTeam)} {homeTeam ?? 'TBD'}</span>
+      <span className="team home">
+        {getFlag(homeTeam) && <span className="team-flag">{getFlag(homeTeam)}</span>}
+        <span className="team-name-text">{homeTeam ?? 'TBD'}</span>
+      </span>
       <div className="score">
         {finished || live ? (
           `${homeScore} – ${awayScore}`
         ) : upcoming && hasPrediction ? (
           <div>
             <div className="predicted-score">
-              {predictedHomeScore} – {predictedAwayScore}{' '}
+              <span className="pred-score-line">{predictedHomeScore} – {predictedAwayScore}</span>
               <span className={`pred-label ${predictedConfidence || ''}`}>
-                {predictedConfidence ? `(pred · ${predictedConfidence})` : '(pred)'}
+                {predictedConfidence ? `pred · ${predictedConfidence}` : 'pred'}
               </span>
             </div>
             <div className="kickoff-time">{dateStr} {timeStr}</div>
@@ -54,7 +57,10 @@ function FixtureRow({
           <span className="kickoff">{dateStr} {timeStr}</span>
         )}
       </div>
-      <span className="team away">{awayTeam ?? 'TBD'} {getFlag(awayTeam)}</span>
+      <span className="team away">
+        {getFlag(awayTeam) && <span className="team-flag">{getFlag(awayTeam)}</span>}
+        <span className="team-name-text">{awayTeam ?? 'TBD'}</span>
+      </span>
       <span className={`status-badge ${live ? 'live' : ''}`}>
         {finished ? 'FT' : live ? status : 'Upcoming'}
       </span>
