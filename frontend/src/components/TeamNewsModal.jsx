@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -28,27 +29,30 @@ export default function TeamNewsModal({ teamName, onClose }) {
     return () => document.removeEventListener('keydown', handler)
   }, [onClose])
 
-  return (
+  return createPortal(
     <div role="dialog" aria-modal="true" className="news-modal-backdrop" onClick={onClose}>
       <div className="news-modal-box" onClick={e => e.stopPropagation()}>
         <div className="news-modal-header">
           <h2>{teamName}</h2>
           <button aria-label="Close" onClick={onClose}>✕</button>
         </div>
-        {loading && <p>Loading…</p>}
-        {error && <p>Could not load news.</p>}
-        {!loading && !error && snippets.length === 0 && (
-          <p>No recent news available.</p>
-        )}
-        {!loading && !error && snippets.length > 0 && (
-          <>
-            {date && <p className="news-date">{date}</p>}
-            <ul className="news-snippets">
-              {snippets.map((s, i) => <li key={i}>{s}</li>)}
-            </ul>
-          </>
-        )}
+        <div className="news-modal-body">
+          {loading && <p>Loading…</p>}
+          {error && <p>Could not load news.</p>}
+          {!loading && !error && snippets.length === 0 && (
+            <p>No recent news available.</p>
+          )}
+          {!loading && !error && snippets.length > 0 && (
+            <>
+              {date && <p className="news-date">{date}</p>}
+              <ul className="news-snippets">
+                {snippets.map((s, i) => <li key={i}>{s}</li>)}
+              </ul>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
