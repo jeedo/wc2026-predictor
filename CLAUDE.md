@@ -134,6 +134,35 @@ gh issue view <N>  # read an issue before starting work
 
 ---
 
+## Key Vault Secret Rotation
+
+App Service / Function Apps cache KV secret values for up to **24 hours**. A function app restart alone does not flush the cache.
+
+**Runbook for rotating a secret:**
+
+1. Update the secret in Key Vault:
+   ```bash
+   az keyvault secret set --vault-name kv-wc2026-zwn7h5hfxftt2 --name <secret-name> --value "<new-value>"
+   ```
+2. Force the function app to re-fetch all KV references immediately (no restart needed):
+   ```bash
+   RESOURCE_ID=$(az functionapp show --name func-wc2026-zwn7h5hfxftt2 --resource-group rg-wc2026 --query id -o tsv)
+   az rest --method POST \
+     --url "https://management.azure.com${RESOURCE_ID}/config/configreferences/appsettings/refresh?api-version=2022-03-01"
+   ```
+   The response lists every KV-backed setting with `"status": "Resolved"` or an error detail.
+
+3. Verify the target secret resolved:
+   ```bash
+   az rest --method POST \
+     --url "https://management.azure.com${RESOURCE_ID}/config/configreferences/appsettings/refresh?api-version=2022-03-01" \
+     --query "value[?name=='<SETTING_NAME>'].properties"
+   ```
+
+**Do not** set the app setting to a plain string as a workaround — always keep it as a KV reference and use the refresh API instead.
+
+---
+
 ## Debugging & Monitoring
 
 **Query Application Insights Logs:**
