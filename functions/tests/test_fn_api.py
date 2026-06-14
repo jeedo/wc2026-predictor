@@ -741,3 +741,70 @@ def test_get_news_url_decodes_team_name():
     assert resp.status_code == 200
     body = _json_body(resp)
     assert body["teamName"] == "United States"
+
+
+# ---------------------------------------------------------------------------
+# POST /api/news/refresh
+# ---------------------------------------------------------------------------
+
+def test_news_refresh_fetches_all_teams():
+    req = _make_request(method="POST", url="http://localhost/api/news/refresh")
+    containers = _mock_containers()
+    teams_container = containers[0]
+    teams_container.query_items = MagicMock(return_value=iter([
+        {"name": "Germany"}, {"name": "Mexico"},
+    ]))
+    news_container = _mock_news_container()
+
+    with (
+        patch("fn_api.get_containers", return_value=containers),
+        patch("fn_api.get_news_container", return_value=news_container),
+        patch("fn_api.os.environ.get", side_effect=lambda k, d="": "test-key" if k == "SERPA_API_KEY" else d),
+        patch("shared.serpa.search_team_news", return_value=["Headline 1", "Headline 2"]),
+    ):
+        resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["status"] == "ok"
+    assert body["teams"] == 2
+    assert body["fetched"] == 2
+    assert body["results"]["Germany"] == 2
+    assert body["results"]["Mexico"] == 2
+
+
+def test_news_refresh_accepts_team_subset():
+    req = _make_request(
+        method="POST", url="http://localhost/api/news/refresh",
+        body=json.dumps({"teams": ["Germany"]}).encode(),
+    )
+    containers = _mock_containers()
+    news_container = _mock_news_container()
+
+    with (
+        patch("fn_api.get_containers", return_value=containers),
+        patch("fn_api.get_news_container", return_value=news_container),
+        patch("fn_api.os.environ.get", side_effect=lambda k, d="": "test-key" if k == "SERPA_API_KEY" else d),
+        patch("shared.serpa.search_team_news", return_value=["Headline"]),
+    ):
+        resp = api_main(req)
+
+    assert resp.status_code == 200
+    body = _json_body(resp)
+    assert body["teams"] == 1
+    assert "Germany" in body["results"]
+
+
+def test_news_refresh_returns_503_without_api_key():
+    req = _make_request(method="POST", url="http://localhost/api/news/refresh")
+    containers = _mock_containers()
+    news_container = _mock_news_container()
+
+    with (
+        patch("fn_api.get_containers", return_value=containers),
+        patch("fn_api.get_news_container", return_value=news_container),
+        patch("fn_api.os.environ.get", return_value=""),
+    ):
+        resp = api_main(req)
+
+    assert resp.status_code == 503
