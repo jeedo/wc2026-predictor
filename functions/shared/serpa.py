@@ -1,4 +1,4 @@
-"""SerpApi Google News client for fetching team news."""
+"""Serper.dev Google News client for fetching team news."""
 from __future__ import annotations
 
 import logging
@@ -9,7 +9,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_SERPAPI_URL = "https://serpapi.com/search.json"
+_SERPER_URL = "https://google.serper.dev/news"
 
 
 async def search_team_news(
@@ -24,35 +24,37 @@ async def search_team_news(
     if max_results is None:
         max_results = int(os.environ.get("SERPA_MAX_RESULTS", "3"))
     query = f"{team_name} FIFA World Cup 2026 injury form squad"
-    params: dict[str, str | int] = {
-        "engine": "google_news",
+    headers = {
+        "X-API-KEY": api_key,
+        "Content-Type": "application/json",
+    }
+    payload: dict[str, Any] = {
         "q": query,
-        "api_key": api_key,
         "num": max_results,
     }
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(_SERPAPI_URL, params=params)
+            response = await client.post(_SERPER_URL, headers=headers, json=payload)
             if response.status_code in (401, 403):
                 logger.error(
-                    "SerpApi key invalid or unauthorized (HTTP %s) for %r",
+                    "Serper.dev key invalid or unauthorized (HTTP %s) for %r",
                     response.status_code, team_name,
                 )
                 return []
             if response.status_code == 429:
-                logger.warning("SerpApi rate limit exceeded (HTTP 429) for %r", team_name)
+                logger.warning("Serper.dev rate limit exceeded (HTTP 429) for %r", team_name)
                 return []
             response.raise_for_status()
             data: dict[str, Any] = response.json()
     except httpx.TimeoutException as exc:
-        logger.warning("SerpApi news search timed out for %r: %s", team_name, exc)
+        logger.warning("Serper.dev news search timed out for %r: %s", team_name, exc)
         return []
     except httpx.HTTPError as exc:
-        logger.warning("SerpApi news search failed for %r: %s", team_name, exc)
+        logger.warning("Serper.dev news search failed for %r: %s", team_name, exc)
         return []
 
     snippets: list[str] = []
-    for item in data.get("news_results", [])[:max_results]:
+    for item in data.get("news", [])[:max_results]:
         title = item.get("title", "")
         snippet = item.get("snippet", "")
         text = snippet or title
