@@ -60,4 +60,5 @@ async def search_team_news(
         text = snippet or title
         if text:
             snippets.append(text.strip())
+    logger.info("Serper.dev returned %d snippet(s) for %r", len(snippets), team_name)
     return snippets
