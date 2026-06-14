@@ -125,11 +125,86 @@ async def test_search_returns_empty_on_403():
 
 
 @pytest.mark.asyncio
-async def test_search_returns_empty_on_429():
+async def test_search_retries_on_429_then_succeeds():
+    """On 429, should wait using x-ratelimit-reset then succeed on retry."""
+    import time
+    rate_limited = _make_mock_client(429, {})
+    rate_limited.post.return_value.headers = {"x-ratelimit-reset": str(int(time.time()) + 1)}
+    success = _make_mock_client(200, SERPER_SUCCESS)
+
+    call_count = 0
+    async def _post(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return rate_limited.post.return_value
+        return success.post.return_value
+
     with patch("shared.serpa.httpx.AsyncClient") as mock_client_cls:
-        mock_client_cls.return_value = _make_mock_client(429, {})
-        results = await search_team_news("Germany", api_key="test-key")
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(side_effect=_post)
+        mock_client_cls.return_value = mock_client
+
+        with patch("shared.serpa.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            results = await search_team_news("Germany", api_key="test-key")
+
+    assert len(results) == 2
+    mock_sleep.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_search_returns_empty_after_exhausting_429_retries():
+    """After MAX_RETRIES 429 responses, should return []."""
+    mock_response = MagicMock()
+    mock_response.status_code = 429
+    mock_response.headers = {}
+
+    with patch("shared.serpa.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client_cls.return_value = mock_client
+
+        with patch("shared.serpa.asyncio.sleep", new_callable=AsyncMock):
+            results = await search_team_news("Germany", api_key="test-key")
+
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_uses_reset_header_for_wait_time():
+    """429 with x-ratelimit-reset should wait until that timestamp."""
+    import time
+    future_reset = int(time.time()) + 5
+
+    rate_limited = MagicMock()
+    rate_limited.status_code = 429
+    rate_limited.headers = {"x-ratelimit-reset": str(future_reset)}
+
+    success = MagicMock()
+    success.status_code = 200
+    success.raise_for_status = MagicMock()
+    success.json.return_value = {"news": []}
+    success.headers = {}
+
+    responses = iter([rate_limited, success])
+
+    with patch("shared.serpa.httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(side_effect=lambda *a, **kw: next(responses))
+        mock_client_cls.return_value = mock_client
+
+        with patch("shared.serpa.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            with patch("shared.serpa.time.time", return_value=float(future_reset - 5)):
+                await search_team_news("Germany", api_key="test-key")
+
+    sleep_arg = mock_sleep.call_args[0][0]
+    assert 5.0 <= sleep_arg <= 6.0  # ~5s wait + 0.5s buffer
 
 
 @pytest.mark.asyncio

@@ -283,7 +283,14 @@ def _handle_news_refresh(
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     async def _fetch_all(names: list[str]) -> dict[str, list[str]]:
-        tasks = [search_team_news(name, api_key=serpa_key) for name in names]
+        # Semaphore keeps concurrency under Serper.dev's 25 req/window limit
+        sem = asyncio.Semaphore(20)
+
+        async def _fetch_one(name: str) -> list[str]:
+            async with sem:
+                return await search_team_news(name, api_key=serpa_key)
+
+        tasks = [_fetch_one(name) for name in names]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         return {
             name: (snippets if isinstance(snippets, list) else [])
