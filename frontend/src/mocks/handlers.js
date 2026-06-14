@@ -22,4 +22,9 @@ export const handlers = [
   ),
 
   http.get('/api/news/:team', () => HttpResponse.json(MOCK_NEWS)),
+
+  http.post('/api/news/refresh', () => HttpResponse.json({
+    status: 'ok', date: '2026-06-14', teams: 2, fetched: 2,
+    results: { Germany: 3, Mexico: 3 },
+  })),
 ]

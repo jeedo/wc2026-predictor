@@ -251,6 +251,80 @@ def _handle_news(news_container: Any, team_name: str) -> func.HttpResponse:
     return _json_200({"teamName": team_name, "snippets": [], "date": None})
 
 
+def _handle_news_refresh(
+    teams_container: Any, news_container: Any, req: func.HttpRequest
+) -> func.HttpResponse:
+    """Fetch fresh news for all teams (or a subset) from Serper.dev and upsert to Cosmos."""
+    from shared.serpa import search_team_news
+
+    serpa_key = os.environ.get("SERPA_API_KEY", "")
+    if not serpa_key:
+        return func.HttpResponse(
+            body=json.dumps({"error": "SERPA_API_KEY not configured"}),
+            status_code=503,
+            mimetype="application/json",
+        )
+
+    # Optional body: {"teams": ["Mexico", "Germany"]} — omit for all teams
+    requested: list[str] | None = None
+    try:
+        body = req.get_json()
+        if isinstance(body.get("teams"), list):
+            requested = body["teams"]
+    except (ValueError, AttributeError):
+        pass
+
+    if requested is not None:
+        team_names = requested
+    else:
+        teams = query_items(teams_container, "SELECT c.name FROM c")
+        team_names = [t["name"] for t in teams]
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    async def _fetch_all(names: list[str]) -> dict[str, list[str]]:
+        # Semaphore keeps concurrency under Serper.dev's 25 req/window limit
+        sem = asyncio.Semaphore(20)
+
+        async def _fetch_one(name: str) -> list[str]:
+            async with sem:
+                return await search_team_news(name, api_key=serpa_key)
+
+        tasks = [_fetch_one(name) for name in names]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        return {
+            name: (snippets if isinstance(snippets, list) else [])
+            for name, snippets in zip(names, results)
+        }
+
+    fetched = asyncio.run(_fetch_all(team_names))
+
+    from fn_predict import _safe_id
+    counts: dict[str, int] = {}
+    for name, snippets in fetched.items():
+        cache_id = f"news-{_safe_id(name)}-{today}"
+        try:
+            news_container.upsert_item(body={
+                "id": cache_id,
+                "teamName": name,
+                "date": today,
+                "snippets": snippets,
+            })
+        except Exception as e:
+            logger.warning("Failed to cache news for %s: %s", name, e)
+        counts[name] = len(snippets)
+
+    teams_with_news = sum(1 for v in counts.values() if v > 0)
+    logger.info("news/refresh: upserted news for %d/%d teams", teams_with_news, len(team_names))
+    return _json_200({
+        "status": "ok",
+        "date": today,
+        "teams": len(team_names),
+        "fetched": teams_with_news,
+        "results": counts,
+    })
+
+
 def _handle_accuracy(scores_container: Any) -> func.HttpResponse:
     docs = query_items(
         scores_container,
@@ -584,6 +658,10 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         m = re.fullmatch(r"fixtures/(\d+)", route)
         if m:
             return _handle_fixtures(fixtures_container, predictions_container, int(m.group(1)))
+
+        if route == "news/refresh" and req.method == "POST":
+            news_container = get_news_container()
+            return _handle_news_refresh(teams_container, news_container, req)
 
         # news/<team>
         m = re.fullmatch(r"news/(.+)", route)
