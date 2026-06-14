@@ -1,28 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
-import { vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server } from '../mocks/server'
 import AccuracyView from '../components/AccuracyView'
-
-const ACCURACY_DATA = {
-  matchday: 2,
-  evaluatedAt: '2026-06-22T10:00:00Z',
-  score: 8,
-  totalGroups: 12,
-  groups: [
-    { group: 'A', correct: true, predictedWinner: 'Germany', actualWinner: 'Germany',
-      predictedRunnerUp: 'Mexico', actualRunnerUp: 'Mexico' },
-    { group: 'B', correct: false, predictedWinner: 'Brazil', actualWinner: 'France',
-      predictedRunnerUp: 'Argentina', actualRunnerUp: 'England' },
-  ],
-}
-
-beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true,
-    json: () => Promise.resolve(ACCURACY_DATA),
-  }))
-})
-
-afterEach(() => vi.restoreAllMocks())
 
 test('shows overall score', async () => {
   render(<AccuracyView />)
@@ -66,16 +45,15 @@ test('shows predicted and actual values', async () => {
 })
 
 test('shows loading state initially', () => {
+  server.use(http.get('/api/accuracy', () => new Promise(() => {})))
   render(<AccuracyView />)
   expect(document.querySelector('phantom-ui')).toBeInTheDocument()
 })
 
 test('shows 404 message when no data', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: false,
-    status: 404,
-    json: () => Promise.resolve({ error: 'No accuracy data available' }),
-  }))
+  server.use(
+    http.get('/api/accuracy', () => new HttpResponse(null, { status: 404 }))
+  )
   render(<AccuracyView />)
   await waitFor(() => {
     expect(screen.getByText(/no accuracy/i)).toBeInTheDocument()

@@ -1,62 +1,44 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import { vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server } from '../mocks/server'
 import TeamNewsModal from '../components/TeamNewsModal'
 
-const NEWS_DATA = {
-  teamName: 'Germany',
-  date: '2026-06-09',
-  snippets: ['Müller back in squad', 'Germany train in Berlin'],
-}
-
-afterEach(() => vi.restoreAllMocks())
-
 test('shows team name in heading', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true,
-    json: () => Promise.resolve(NEWS_DATA),
-  }))
   render(<TeamNewsModal teamName="Germany" onClose={() => {}} />)
   expect(screen.getByText(/Germany/)).toBeInTheDocument()
 })
 
 test('shows loading state initially', () => {
-  vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise(() => {})))
+  server.use(http.get('/api/news/:team', () => new Promise(() => {})))
   render(<TeamNewsModal teamName="Germany" onClose={() => {}} />)
   expect(screen.getByText(/loading/i)).toBeInTheDocument()
 })
 
 test('renders snippets after load', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true,
-    json: () => Promise.resolve(NEWS_DATA),
-  }))
   render(<TeamNewsModal teamName="Germany" onClose={() => {}} />)
   await waitFor(() => {
-    expect(screen.getByText('Müller back in squad')).toBeInTheDocument()
-    expect(screen.getByText('Germany train in Berlin')).toBeInTheDocument()
+    expect(screen.getByText('Müller back in full training')).toBeInTheDocument()
+    expect(screen.getByText('Germany prep warm-up win')).toBeInTheDocument()
   })
 })
 
 test('shows no-news message when snippets empty', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true,
-    json: () => Promise.resolve({ teamName: 'Germany', snippets: [], date: null }),
-  }))
+  server.use(
+    http.get('/api/news/:team', () =>
+      HttpResponse.json({ snippets: [], date: null })
+    )
+  )
   render(<TeamNewsModal teamName="Germany" onClose={() => {}} />)
   await waitFor(() => expect(screen.getByText(/no recent news/i)).toBeInTheDocument())
 })
 
 test('shows error message on fetch failure', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
+  server.use(http.get('/api/news/:team', () => HttpResponse.error()))
   render(<TeamNewsModal teamName="Germany" onClose={() => {}} />)
   await waitFor(() => expect(screen.getByText(/could not load/i)).toBeInTheDocument())
 })
 
 test('calls onClose when close button clicked', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true,
-    json: () => Promise.resolve(NEWS_DATA),
-  }))
   const onClose = vi.fn()
   render(<TeamNewsModal teamName="Germany" onClose={onClose} />)
   fireEvent.click(screen.getByRole('button', { name: /close/i }))
@@ -64,10 +46,6 @@ test('calls onClose when close button clicked', async () => {
 })
 
 test('calls onClose when backdrop clicked', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true,
-    json: () => Promise.resolve(NEWS_DATA),
-  }))
   const onClose = vi.fn()
   render(<TeamNewsModal teamName="Germany" onClose={onClose} />)
   fireEvent.click(screen.getByRole('dialog'))
@@ -75,10 +53,6 @@ test('calls onClose when backdrop clicked', async () => {
 })
 
 test('calls onClose when Escape key pressed', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true,
-    json: () => Promise.resolve(NEWS_DATA),
-  }))
   const onClose = vi.fn()
   render(<TeamNewsModal teamName="Germany" onClose={onClose} />)
   fireEvent.keyDown(document, { key: 'Escape' })
@@ -86,13 +60,9 @@ test('calls onClose when Escape key pressed', async () => {
 })
 
 test('does not close when clicking inside modal box', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true,
-    json: () => Promise.resolve(NEWS_DATA),
-  }))
   const onClose = vi.fn()
   render(<TeamNewsModal teamName="Germany" onClose={onClose} />)
-  await waitFor(() => screen.getByText('Müller back in squad'))
-  fireEvent.click(screen.getByText('Müller back in squad'))
+  await waitFor(() => screen.getByText('Müller back in full training'))
+  fireEvent.click(screen.getByText('Müller back in full training'))
   expect(onClose).not.toHaveBeenCalled()
 })

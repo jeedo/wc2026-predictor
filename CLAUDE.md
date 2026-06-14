@@ -62,6 +62,30 @@ test(auth): add edge cases for expired tokens
 
 ---
 
+## Local UI Development
+
+The frontend uses **MSW (Mock Service Worker)** so the full UI can be developed and tested without a live backend.
+
+**Run with mock data (no Azure backend needed):**
+```bash
+cd frontend
+npm run dev
+```
+MSW is automatically activated in dev mode (`import.meta.env.DEV`). All API routes (`/api/groups`, `/api/predictions`, `/api/fixtures/:matchday`, `/api/news/:team`, etc.) are intercepted and return realistic seed data from `src/mocks/data.js`.
+
+**Adding or updating mock handlers:**
+- Seed data lives in `frontend/src/mocks/data.js` — edit constants here to change what the UI shows
+- Route handlers live in `frontend/src/mocks/handlers.js` — add new `http.get(...)` entries for new endpoints
+- Handlers use relative paths (`/api/...`) so they match any origin (both Vite dev server and jsdom tests)
+
+**Tests share the same handlers:**
+- `src/test-setup.js` starts the MSW Node server before each test suite
+- Tests use `server.use(http.get('/api/...', () => HttpResponse.json(...)))` for per-test overrides
+- `server.resetHandlers()` in `afterEach` clears overrides automatically — no manual cleanup needed
+- Do NOT use `vi.stubGlobal('fetch', ...)` — use `server.use()` instead
+
+---
+
 ## Python Projects
 
 - Always use `uv` — never pip, never poetry

@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
-import { vi } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server } from '../mocks/server'
 import BracketView from '../components/BracketView'
 
 const PRED_WITH_KNOCKOUT = {
@@ -25,26 +26,14 @@ const PRED_WITH_KNOCKOUT = {
   ],
 }
 
-const PRED_NO_KNOCKOUT = {
-  matchday: 1,
-  groups: [],
-  knockout: [],
-}
-
-afterEach(() => vi.restoreAllMocks())
-
 test('shows heading', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, json: () => Promise.resolve(PRED_WITH_KNOCKOUT),
-  }))
+  server.use(http.get('/api/predictions', () => HttpResponse.json(PRED_WITH_KNOCKOUT)))
   render(<BracketView />)
   await waitFor(() => expect(screen.getByRole('heading', { name: /knockout bracket/i })).toBeInTheDocument())
 })
 
 test('shows round labels when predictions exist', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, json: () => Promise.resolve(PRED_WITH_KNOCKOUT),
-  }))
+  server.use(http.get('/api/predictions', () => HttpResponse.json(PRED_WITH_KNOCKOUT)))
   render(<BracketView />)
   await waitFor(() => {
     expect(screen.getByText('Round of 16')).toBeInTheDocument()
@@ -53,33 +42,24 @@ test('shows round labels when predictions exist', async () => {
 })
 
 test('shows team names from predictions', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, json: () => Promise.resolve(PRED_WITH_KNOCKOUT),
-  }))
+  server.use(http.get('/api/predictions', () => HttpResponse.json(PRED_WITH_KNOCKOUT)))
   render(<BracketView />)
   await waitFor(() => {
-    // France appears in multiple rounds; getAllByText handles that
     expect(screen.getAllByText(/France/).length).toBeGreaterThan(0)
     expect(screen.getByText(/Brazil/)).toBeInTheDocument()
   })
 })
 
 test('shows predicted scores', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, json: () => Promise.resolve(PRED_WITH_KNOCKOUT),
-  }))
+  server.use(http.get('/api/predictions', () => HttpResponse.json(PRED_WITH_KNOCKOUT)))
   render(<BracketView />)
   await waitFor(() => {
-    // France vs Brazil: 2-1
     const twos = screen.getAllByText('2')
     expect(twos.length).toBeGreaterThan(0)
   })
 })
 
 test('shows coming-soon message when no knockout predictions', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, json: () => Promise.resolve(PRED_NO_KNOCKOUT),
-  }))
   render(<BracketView />)
   await waitFor(() => {
     expect(screen.getByText(/group stage concludes/i)).toBeInTheDocument()
@@ -87,15 +67,13 @@ test('shows coming-soon message when no knockout predictions', async () => {
 })
 
 test('shows loading state initially', () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: true, json: () => new Promise(() => {}),
-  }))
+  server.use(http.get('/api/predictions', () => new Promise(() => {})))
   render(<BracketView />)
   expect(document.querySelector('phantom-ui')).toBeInTheDocument()
 })
 
 test('shows error when fetch fails', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
+  server.use(http.get('/api/predictions', () => HttpResponse.error()))
   render(<BracketView />)
   await waitFor(() => expect(screen.getByText(/error/i)).toBeInTheDocument())
 })
