@@ -4,8 +4,17 @@ import '@aejkatappaja/phantom-ui'
 import './index.css'
 import App from './App.jsx'
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+async function prepare() {
+  if (import.meta.env.DEV) {
+    const { worker } = await import('./mocks/browser.js')
+    return worker.start({ onUnhandledRequest: 'bypass' })
+  }
+}
+
+prepare().then(() =>
+  createRoot(document.getElementById('root')).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  )
 )

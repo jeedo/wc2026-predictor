@@ -116,12 +116,25 @@ Five containers, all using NoSQL JSON documents. Partition keys designed for poi
 ### 3.4 React Frontend
 
 - **Groups View**: all 12 groups (A–L) with predicted winner, runner-up, and Claude's reasoning blurb; each team name shows a 📰 news icon that opens the `TeamNewsModal` overlay
-- **TeamNewsModal**: fetches `GET /news/{team}` on open; shows loading state, snippets list, empty state, and error state; closes on backdrop click, close button, or Escape key
+- **TeamNewsModal**: fetches `GET /news/{team}` on open; shows loading state, snippets list, empty state, and error state; closes on backdrop click, close button, or Escape key; rendered via `createPortal` to `document.body` to avoid z-index/overflow clipping
 - **Fixtures View**: upcoming and completed matches with live scores per group
 - **Accuracy View**: after each matchday, shows correct vs incorrect predictions
 - **Usage View**: shows current-window API call counts and rate-limit percentage per provider
 - Deployed via the `frontend` stage in Azure DevOps Pipelines using the `AzureStaticWebApp@0` task
 - Calls `fn-api` HTTP trigger directly; no separate backend server required
+
+#### Mock Layer (MSW)
+
+`frontend/src/mocks/` provides a shared API mock layer using [MSW (Mock Service Worker)](https://mswjs.io/):
+
+| File | Purpose |
+|---|---|
+| `data.js` | Seed data constants (groups, predictions, fixtures, news, etc.) shared across handlers and tests |
+| `handlers.js` | MSW request handlers for all API routes, using relative paths (`/api/...`) to match any origin |
+| `browser.js` | `setupWorker` for the Vite dev server — intercepts fetch at the service worker level |
+| `server.js` | `setupServer` for vitest — intercepts fetch in Node.js |
+
+In dev mode (`npm run dev`), `main.jsx` starts the MSW browser worker so the full UI loads with realistic mock data and no backend connection required. In tests, `test-setup.js` starts the Node server before each suite and resets handlers after each test, so all tests share one consistent mock baseline and use `server.use()` for per-test overrides.
 
 ### 3.5 Azure DevOps Pipeline
 
@@ -148,6 +161,7 @@ wc2026-predictor/
 │   └── host.json
 ├── frontend/
 │   ├── src/
+│   │   └── mocks/   data.js, handlers.js, browser.js, server.js
 │   └── package.json
 └── pipelines/
     └── azure-pipelines.yml

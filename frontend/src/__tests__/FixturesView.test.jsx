@@ -1,37 +1,28 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { vi, beforeEach, afterEach, test, expect } from 'vitest'
+import { http, HttpResponse } from 'msw'
+import { server } from '../mocks/server'
+import { MOCK_FIXTURES_MD1, MOCK_FIXTURES_MD2 } from '../mocks/data'
 import FixturesView from '../components/FixturesView'
 
-const MD1 = {
-  matchday: 1,
-  fixtures: [
-    { id: 'fixture-101', matchday: 1, homeTeam: 'Germany', awayTeam: 'Mexico',
-      homeScore: 2, awayScore: 0, status: 'FT', kickoff: '2026-06-12T15:00:00Z' },
-    { id: 'fixture-102', matchday: 1, homeTeam: 'Brazil', awayTeam: 'Argentina',
-      homeScore: null, awayScore: null, status: 'NS', kickoff: '2026-06-12T18:00:00Z',
-      predictedHomeScore: 2, predictedAwayScore: 1, predictedConfidence: 'medium' },
-    { id: 'fixture-103', matchday: 1, homeTeam: 'France', awayTeam: 'Spain',
-      homeScore: null, awayScore: null, status: 'NS', kickoff: '2026-06-13T15:00:00Z' },
-  ],
+const PREDICTIONS_EMPTY_KNOCKOUT = { matchday: 1, groups: [], knockout: [] }
+
+const PREDICTIONS_WITH_KNOCKOUT = {
+  matchday: 1, groups: [],
+  knockout: [{ stage: 'LAST_16', matches: [
+    { fixtureId: 5001, stage: 'LAST_16', homeTeam: 'France', awayTeam: 'Brazil',
+      predictedWinner: 'France', predictedHomeScore: 2, predictedAwayScore: 1, confidence: 'high' },
+  ]}],
 }
 
-const MD2 = {
-  matchday: 2,
+const STAGE_FIXTURES = {
+  stage: 'LAST_16',
   fixtures: [
-    { id: 'fixture-201', matchday: 2, homeTeam: 'France', awayTeam: 'England',
-      homeScore: 1, awayScore: 1, status: 'FT', kickoff: '2026-06-17T15:00:00Z' },
+    { id: 'f-ko-1', fixtureId: 5001, stage: 'LAST_16', matchday: 'LAST_16',
+      homeTeam: 'France', awayTeam: 'Brazil', homeScore: null, awayScore: null,
+      status: 'NS', kickoff: '2026-06-28T18:00:00Z' },
   ],
 }
-
-beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn().mockImplementation((url) => {
-    const md = url.includes('/2') ? MD2 : MD1
-    return Promise.resolve({ ok: true, json: () => Promise.resolve(md) })
-  }))
-})
-
-afterEach(() => vi.restoreAllMocks())
 
 test('renders matchday tab selector', async () => {
   render(<FixturesView />)
@@ -60,31 +51,33 @@ test('shows score for finished matches', async () => {
 test('shows kickoff time for upcoming matches', async () => {
   render(<FixturesView />)
   await waitFor(() => {
-    // Brazil vs Argentina is NS — should not show a score
     expect(screen.queryByText('null – null')).not.toBeInTheDocument()
   })
 })
 
 test('switching tab loads different matchday', async () => {
+  server.use(
+    http.get('/api/fixtures/:matchday', ({ params }) =>
+      HttpResponse.json(params.matchday === '2' ? MOCK_FIXTURES_MD2 : MOCK_FIXTURES_MD1)
+    )
+  )
   const user = userEvent.setup()
   render(<FixturesView />)
-
   await waitFor(() => screen.getByText(/Germany/))
-
   await user.click(screen.getByRole('tab', { name: /matchday 2/i }))
-
   await waitFor(() => {
     expect(screen.getByText(/France/)).toBeInTheDocument()
   })
 })
 
 test('shows loading state initially', () => {
+  server.use(http.get('/api/fixtures/:matchday', () => new Promise(() => {})))
   render(<FixturesView />)
   expect(document.querySelector('phantom-ui')).toBeInTheDocument()
 })
 
 test('shows error when fetch fails', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
+  server.use(http.get('/api/fixtures/:matchday', () => HttpResponse.error()))
   render(<FixturesView />)
   await waitFor(() => {
     expect(screen.getByText(/error/i)).toBeInTheDocument()
@@ -94,7 +87,6 @@ test('shows error when fetch fails', async () => {
 test('shows predicted score for upcoming matches with predictions', async () => {
   render(<FixturesView />)
   await waitFor(() => {
-    // Brazil vs Argentina has predictedHomeScore: 2, predictedAwayScore: 1
     expect(screen.getByText('2 – 1')).toBeInTheDocument()
     expect(screen.getByText('pred · medium')).toBeInTheDocument()
   })
@@ -103,7 +95,6 @@ test('shows predicted score for upcoming matches with predictions', async () => 
 test('shows confidence level in predicted score', async () => {
   render(<FixturesView />)
   await waitFor(() => {
-    // Brazil vs Argentina has predictedConfidence: 'medium'
     expect(screen.getByText('pred · medium')).toBeInTheDocument()
   })
 })
@@ -111,10 +102,8 @@ test('shows confidence level in predicted score', async () => {
 test('shows kickoff time alongside predicted score', async () => {
   render(<FixturesView />)
   await waitFor(() => {
-    // Should show both predicted score and kickoff time for Brazil vs Argentina
     expect(screen.getByText(/Brazil/)).toBeInTheDocument()
     expect(screen.getByText(/Argentina/)).toBeInTheDocument()
-    // Predicted score is shown with confidence on its own line
     expect(screen.getByText('pred · medium')).toBeInTheDocument()
   })
 })
@@ -122,7 +111,6 @@ test('shows kickoff time alongside predicted score', async () => {
 test('shows only kickoff time for upcoming matches without predictions', async () => {
   render(<FixturesView />)
   await waitFor(() => {
-    // France vs Spain has no predictions, should show kickoff time
     expect(screen.getByText(/France/)).toBeInTheDocument()
     expect(screen.getByText(/Spain/)).toBeInTheDocument()
   })
@@ -136,12 +124,9 @@ test('renders Knockout tab button', async () => {
 })
 
 test('switching to Knockout tab shows coming-soon when no knockout predictions', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockImplementation((url) => {
-    if (url.includes('/api/predictions'))
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ matchday: 1, groups: [], knockout: [] }) })
-    return Promise.resolve({ ok: true, json: () => Promise.resolve(MD1) })
-  }))
-
+  server.use(
+    http.get('/api/predictions', () => HttpResponse.json(PREDICTIONS_EMPTY_KNOCKOUT))
+  )
   const user = userEvent.setup()
   render(<FixturesView />)
   await user.click(screen.getByRole('tab', { name: /knockout/i }))
@@ -151,34 +136,13 @@ test('switching to Knockout tab shows coming-soon when no knockout predictions',
 })
 
 test('Knockout tab shows loading then stage sections when predictions exist', async () => {
-  const PREDICTIONS = {
-    matchday: 1, groups: [],
-    knockout: [{ stage: 'LAST_16', matches: [
-      { fixtureId: 5001, stage: 'LAST_16', homeTeam: 'France', awayTeam: 'Brazil',
-        predictedWinner: 'France', predictedHomeScore: 2, predictedAwayScore: 1, confidence: 'high' },
-    ]}],
-  }
-  const STAGE_FIXTURES = {
-    stage: 'LAST_16',
-    fixtures: [
-      { id: 'f-ko-1', fixtureId: 5001, stage: 'LAST_16', matchday: 'LAST_16',
-        homeTeam: 'France', awayTeam: 'Brazil', homeScore: null, awayScore: null,
-        status: 'NS', kickoff: '2026-06-28T18:00:00Z' },
-    ],
-  }
-  vi.stubGlobal('fetch', vi.fn().mockImplementation((url) => {
-    if (url.includes('/api/predictions'))
-      return Promise.resolve({ ok: true, json: () => Promise.resolve(PREDICTIONS) })
-    if (url.includes('/stage/'))
-      return Promise.resolve({ ok: true, json: () => Promise.resolve(STAGE_FIXTURES) })
-    return Promise.resolve({ ok: true, json: () => Promise.resolve(MD1) })
-  }))
-
+  server.use(
+    http.get('/api/predictions', () => HttpResponse.json(PREDICTIONS_WITH_KNOCKOUT)),
+    http.get('/api/fixtures/stage/:stage', () => HttpResponse.json(STAGE_FIXTURES)),
+  )
   const user = userEvent.setup()
   render(<FixturesView />)
   await user.click(screen.getByRole('tab', { name: /knockout/i }))
-
-  // After predictions load the coming-soon message must NOT appear
   await waitFor(() => {
     expect(screen.queryByText(/group stage concludes/i)).not.toBeInTheDocument()
   })
