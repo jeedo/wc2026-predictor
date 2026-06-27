@@ -509,6 +509,119 @@ async def test_predict_logs_correlation_id(caplog):
 
 
 # ---------------------------------------------------------------------------
+# Fix: do not write empty prediction doc when Claude returns no groups
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_predict_does_not_write_when_predictions_empty():
+    """When Claude returns 0 groups, fn_predict must raise and NOT overwrite the predictions doc."""
+    msg = MagicMock()
+    msg.get_body.return_value = json.dumps({"matchday": 1, "fixtureId": None}).encode()
+
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([_make_team("A", "Germany")]))
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.query_items = MagicMock(return_value=_async_iter([]))
+    mock_predictions_container = MagicMock()
+    mock_predictions_container.upsert_item = AsyncMock()
+
+    mock_response = MagicMock()
+    mock_response.usage = MagicMock(input_tokens=100, output_tokens=10)
+    mock_response.content = [MagicMock(text='{"predictions": []}')]
+    mock_claude = MagicMock()
+    mock_claude.beta.messages.parse = AsyncMock(return_value=mock_response)
+
+    with (
+        patch("fn_predict.get_containers", return_value=(
+            mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
+        )),
+        patch("fn_predict.get_news_container", return_value=None),
+        patch("fn_predict.get_anthropic_client", return_value=mock_claude),
+    ):
+        with pytest.raises(RuntimeError, match="empty predictions"):
+            await _main_async(msg)
+
+    mock_predictions_container.upsert_item.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Fix: resolve matchday="full" to the highest finished group matchday
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_predict_resolves_full_matchday_from_finished_fixtures():
+    """`matchday='full'` resolves to the highest completed group-stage matchday."""
+    msg = MagicMock()
+    msg.get_body.return_value = json.dumps(
+        {"matchday": "full", "correlationId": "test-corr"}
+    ).encode()
+
+    fixtures_data = [
+        _make_fixture(1, "Germany", "Mexico", "FT"),
+        _make_fixture(2, "Germany", "Poland", "FT"),
+        _make_fixture(3, "Germany", "France", "NS"),  # not finished
+    ]
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([_make_team("A", "Germany")]))
+    mock_fixtures_container = MagicMock()
+    # Use side_effect so each query call gets a fresh async generator
+    mock_fixtures_container.query_items = MagicMock(
+        side_effect=lambda **kwargs: _async_iter(list(fixtures_data))
+    )
+    mock_predictions_container = MagicMock()
+    mock_predictions_container.upsert_item = AsyncMock()
+    mock_scores_container = MagicMock()
+    mock_scores_container.upsert_item = AsyncMock()
+
+    mock_claude, _ = _make_claude_mock()
+
+    with (
+        patch("fn_predict.get_containers", return_value=(
+            mock_teams_container, mock_fixtures_container, mock_predictions_container, mock_scores_container
+        )),
+        patch("fn_predict.get_news_container", return_value=None),
+        patch("fn_predict.get_anthropic_client", return_value=mock_claude),
+    ):
+        await _main_async(msg)
+
+    doc = mock_predictions_container.upsert_item.call_args[1]["body"]
+    assert doc["matchday"] == 2, f"Expected matchday=2 (highest FT), got {doc['matchday']}"
+
+
+@pytest.mark.asyncio
+async def test_predict_resolves_full_matchday_defaults_to_3_when_no_finished_fixtures():
+    """`matchday='full'` defaults to 3 when there are no finished group-stage fixtures."""
+    msg = MagicMock()
+    msg.get_body.return_value = json.dumps(
+        {"matchday": "full", "correlationId": "test-corr"}
+    ).encode()
+
+    mock_teams_container = MagicMock()
+    mock_teams_container.query_items = MagicMock(return_value=_async_iter([_make_team("A", "Germany")]))
+    mock_fixtures_container = MagicMock()
+    mock_fixtures_container.query_items = MagicMock(return_value=_async_iter([
+        _make_fixture(1, "Germany", "Mexico", "NS"),
+        _make_fixture(2, "Germany", "Poland", "NS"),
+    ]))
+    mock_predictions_container = MagicMock()
+    mock_predictions_container.upsert_item = AsyncMock()
+
+    mock_claude, _ = _make_claude_mock()
+
+    with (
+        patch("fn_predict.get_containers", return_value=(
+            mock_teams_container, mock_fixtures_container, mock_predictions_container, MagicMock()
+        )),
+        patch("fn_predict.get_news_container", return_value=None),
+        patch("fn_predict.get_anthropic_client", return_value=mock_claude),
+    ):
+        await _main_async(msg)
+
+    doc = mock_predictions_container.upsert_item.call_args[1]["body"]
+    assert doc["matchday"] == 3, f"Expected default matchday=3, got {doc['matchday']}"
+
+
+# ---------------------------------------------------------------------------
 # Knockout stage support (issue #32)
 # ---------------------------------------------------------------------------
 
