@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 logger.info("fn_predict module loaded")
 
 _MODEL = "claude-sonnet-4-5"
-_MAX_TOKENS = 4096
+_MAX_TOKENS = 16384
 
 
 # Pydantic models for structured output
@@ -359,6 +359,19 @@ async def _main_async(msg: func.QueueMessage) -> None:
         logger.info("Querying teams...")
         teams = await query_items(teams_container, "SELECT * FROM c")
         fixtures = await query_items(fixtures_container, "SELECT * FROM c")
+
+        # Resolve the sentinel value sent by fn_ingest for full-tournament triggers
+        if matchday == "full":
+            finished_group = [
+                f for f in fixtures
+                if f.get("status") == "FT" and isinstance(f.get("matchday"), int)
+            ]
+            matchday = max((f["matchday"] for f in finished_group), default=3)
+            logger.info(
+                "Resolved 'full' matchday → %d based on %d finished group-stage fixtures",
+                matchday, len(finished_group),
+            )
+
         track_event("fn_predict/data_loaded", {
             "matchday": str(matchday),
             "teams_count": str(len(teams)),
@@ -429,6 +442,16 @@ async def _main_async(msg: func.QueueMessage) -> None:
             knockout_predictions: list[dict[str, Any]] = full_response.get("knockout", [])
         except Exception:
             knockout_predictions = []
+
+        if not predictions:
+            logger.error(
+                "Claude returned 0 group predictions — skipping write to protect existing data. "
+                "raw=%.300s", raw_text,
+            )
+            track_event("fn_predict/empty_predictions_aborted", {"matchday": str(matchday)})
+            raise RuntimeError(
+                "Claude returned empty predictions — aborting write to protect existing predictions doc"
+            )
 
         now = datetime.now(timezone.utc).isoformat()
         prediction_doc: dict[str, Any] = {
